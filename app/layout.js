@@ -15,7 +15,6 @@ export default function RootLayout({ children }) {
     <ClerkProvider>
       <html lang="en" className="h-full antialiased animate-fade-in">
         <head>
-          <script src="https://cdn.tailwindcss.com"></script>
           <style type="text/tailwindcss">
             {`
               @layer utilities {

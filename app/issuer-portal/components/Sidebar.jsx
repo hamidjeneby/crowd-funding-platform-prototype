@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { UserButton, useUser } from "@clerk/nextjs";
-import { LayoutDashboard, FileText, Settings, HelpCircle } from "lucide-react";
+import { LayoutDashboard, FileText, Settings, HelpCircle, FolderOpen, PlusCircle } from "lucide-react";
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -15,10 +15,30 @@ export default function Sidebar() {
   }
 
   const links = [
-    { name: "Dashboard", href: "/issuer-portal", icon: LayoutDashboard },
-    { name: "Blank 2", href: "#", icon: FileText },
-    { name: "Blank 3", href: "#", icon: Settings },
-    { name: "Blank 4", href: "#", icon: HelpCircle },
+    { 
+      name: "Dashboard", 
+      href: "/issuer-portal", 
+      icon: LayoutDashboard,
+      match: (path) => path === "/issuer-portal"
+    },
+    {
+      name: "New Project",
+      href: "/issuer-portal/projects/new",
+      icon: PlusCircle,
+      match: (path) => path === "/issuer-portal/projects/new"
+    },
+    { 
+      name: "Projects", 
+      href: "/issuer-portal/projects", 
+      icon: FolderOpen,
+      match: (path) => path === "/issuer-portal/projects" || (path?.startsWith("/issuer-portal/projects/") && path !== "/issuer-portal/projects/new")
+    },
+    { 
+      name: "Settings", 
+      href: "#", 
+      icon: Settings,
+      match: (path) => false
+    },
   ];
 
   return (
@@ -38,26 +58,32 @@ export default function Sidebar() {
             <path d="M2 9H9L12 22L2 9Z" fill="#065f46" />
             <path d="M15 9H22L12 22L15 9Z" fill="#047857" />
           </svg>
-          <span className="text-xl font-bold tracking-tighter text-[#064e3b]">Issuer Portal</span>
+          <span className="text-xl font-bold tracking-tighter text-[#064e3b]">
+            Issuer Portal
+          </span>
         </div>
-        
+
         <div className="border-t border-[#059669]/20 mb-6 w-full"></div>
 
         <nav className="space-y-2">
           {links.map((link, idx) => {
-            const isActive = pathname === link.href || (link.href !== "/issuer-portal" && pathname?.startsWith(link.href));
+            const isActive = link.match ? link.match(pathname) : pathname === link.href;
             return (
               <Link
                 key={idx}
                 href={link.href}
                 className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium text-sm ${
-                  isActive 
-                    ? "bg-[#064e3b] text-white shadow-md" 
+                  isActive
+                    ? "bg-[#064e3b] text-white shadow-md"
                     : "text-[#064e3b] hover:bg-[#ecfdf5]"
                 }`}
-                onClick={link.href === "#" ? (e) => e.preventDefault() : undefined}
+                onClick={
+                  link.href === "#" ? (e) => e.preventDefault() : undefined
+                }
               >
-                <link.icon className={`w-5 h-5 ${isActive ? "opacity-100" : "opacity-70"}`} />
+                <link.icon
+                  className={`w-5 h-5 ${isActive ? "opacity-100" : "opacity-70"}`}
+                />
                 {link.name}
               </Link>
             );
