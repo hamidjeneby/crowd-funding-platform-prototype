@@ -13,11 +13,6 @@ export default function Navbar() {
   const role = user?.publicMetadata?.role || user?.unsafeMetadata?.role;
   const pathname = usePathname();
 
-  // Hide Navbar completely on issuer portal
-  if (pathname?.startsWith("/issuer-portal")) {
-    return null;
-  }
-
   // Close dropdowns when clicking outside
   useEffect(() => {
     function handleClickOutside(event) {
@@ -28,6 +23,11 @@ export default function Navbar() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Hide Navbar completely on issuer portal
+  if (pathname?.startsWith("/issuer-portal")) {
+    return null;
+  }
 
   return (
     <>

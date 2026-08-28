@@ -12,7 +12,7 @@ export default function InvestorSignUpPage() {
   useEffect(() => {
     if (isLoaded && isSignedIn && user) {
       const timeoutId = setTimeout(() => {
-        router.push("/investor-portal");
+        router.push("/investor-portal/onboarding");
       }, 3000);
       return () => clearTimeout(timeoutId);
     }

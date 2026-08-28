@@ -1,6 +1,7 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
+import Sidebar from "./components/Sidebar";
 
 export default async function InvestorPortalLayout({ children }) {
   const user = await currentUser();
@@ -38,5 +39,12 @@ export default async function InvestorPortalLayout({ children }) {
     redirect("/investor/sign-in");
   }
 
-  return <>{children}</>;
+  return (
+    <div className="flex min-h-screen">
+      <Sidebar />
+      <div className="flex-1 overflow-x-hidden">
+        {children}
+      </div>
+    </div>
+  );
 }

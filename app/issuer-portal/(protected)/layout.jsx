@@ -1,6 +1,7 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { createClient } from "@supabase/supabase-js";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 export default async function ProtectedIssuerLayout({ children }) {
   const user = await currentUser();
@@ -40,25 +41,7 @@ export default async function ProtectedIssuerLayout({ children }) {
     : false;
 
   if (!isFullyOnboarded) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#fcfaf5]">
-        <div className="max-w-md w-full bg-white p-8 rounded-lg shadow-sm border border-[#064e3b]/10 text-center">
-          <h2 className="text-2xl font-bold text-[#064e3b] mb-4">
-            Onboarding Required
-          </h2>
-          <p className="text-gray-600 mb-6">
-            You need to complete your profile onboarding before accessing the
-            platform.
-          </p>
-          <Link
-            href="/issuer-portal/onboarding"
-            className="inline-block bg-[#064e3b] text-white px-6 py-2 rounded-md font-medium hover:bg-[#064e3b]/90 transition-colors"
-          >
-            Complete Onboarding
-          </Link>
-        </div>
-      </div>
-    );
+    redirect("/issuer-portal/onboarding");
   }
 
   return <>{children}</>;

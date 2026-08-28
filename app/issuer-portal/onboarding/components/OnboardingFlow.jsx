@@ -8,7 +8,7 @@ import Stage3Docs from "./Stage3Docs";
 import Stage4Banking from "./Stage4Banking";
 import Stage5Review from "./Stage5Review";
 import { useRouter } from "next/navigation";
-import { submitApplication } from "@/app/actions/issuer-onboarding";
+import { submitApplication, updateCurrentStep } from "@/app/actions/issuer-onboarding";
 
 const STEPS = [
   { id: 1, title: "Entity & Jurisdiction" },
@@ -79,22 +79,24 @@ export default function OnboardingFlow({ initialData }) {
     if (requiredDocs.every(d => uploadedDocs.includes(d))) completed.push(3);
     if (initialData.issuer?.bank_details) completed.push(4);
 
-    let startStep = 1;
-    for (let i = 1; i <= 4; i++) {
-      if (!completed.includes(i)) {
-        startStep = i;
-        break;
-      }
-    }
+    let startStep = initialData.issuer?.current_step || 1;
     if (completed.length === 4) startStep = 5;
     setCurrentStep(startStep);
   }, []);
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentStep < 5) {
-      setCurrentStep(prev => prev + 1);
-      if (!completedSteps.includes(currentStep)) {
-        setCompletedSteps(prev => [...prev, currentStep]);
+      try {
+        const nextStep = currentStep + 1;
+        const res = await updateCurrentStep(nextStep);
+        setCurrentStep(res.current_step);
+        if (!completedSteps.includes(currentStep)) {
+          setCompletedSteps(prev => [...prev, currentStep]);
+        }
+      } catch (err) {
+        console.error("Failed to update step", err);
+        // Fallback to simple increment if error
+        setCurrentStep(prev => prev + 1);
       }
     }
   };

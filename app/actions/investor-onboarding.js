@@ -15,21 +15,21 @@ export async function getOnboardingData() {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
 
-  const { data: issuer, error: issuerError } = await supabaseAdmin
-    .from("issuers")
+  const { data: investor, error: investorError } = await supabaseAdmin
+    .from("investors")
     .select("*")
     .eq("user_id", userId)
     .single();
 
-  if (issuerError && issuerError.code !== "PGRST116") {
-    console.error(issuerError);
-    throw new Error("Failed to fetch issuer data");
+  if (investorError && investorError.code !== "PGRST116") {
+    console.error(investorError);
+    throw new Error("Failed to fetch investor data");
   }
 
   const { data: reps, error: repsError } = await supabaseAdmin
-    .from("issuer_reps")
+    .from("investor_reps")
     .select("*")
-    .eq("issuer_id", userId);
+    .eq("investor_id", userId);
 
   if (repsError) {
     console.error(repsError);
@@ -37,21 +37,26 @@ export async function getOnboardingData() {
   }
 
   const { data: docs, error: docsError } = await supabaseAdmin
-    .from("issuer_docs")
+    .from("investor_docs")
     .select("*")
-    .eq("issuer_id", userId);
+    .eq("investor_id", userId);
 
   if (docsError) {
     console.error(docsError);
     throw new Error("Failed to fetch documents");
   }
 
-  // Decrypt sensitive fields
-  if (issuer?.trade_license_number) {
-    issuer.trade_license_number = decrypt(issuer.trade_license_number);
+  // Decrypt sensitive fields for Institutional
+  if (investor?.trade_license_number) {
+    investor.trade_license_number = decrypt(investor.trade_license_number);
   }
-  if (issuer?.bank_details?.iban) {
-    issuer.bank_details.iban = decrypt(issuer.bank_details.iban);
+  // Decrypt sensitive fields for Individual
+  if (investor?.id_number) {
+    investor.id_number = decrypt(investor.id_number);
+  }
+
+  if (investor?.bank_details?.iban) {
+    investor.bank_details.iban = decrypt(investor.bank_details.iban);
   }
 
   const decryptedReps = (reps || []).map(rep => ({
@@ -64,29 +69,94 @@ export async function getOnboardingData() {
     document_password: doc.document_password ? decrypt(doc.document_password) : doc.document_password
   }));
 
-  return { issuer: issuer || {}, reps: decryptedReps, docs: decryptedDocs };
+  return { investor: investor || {}, reps: decryptedReps, docs: decryptedDocs };
 }
 
-export async function saveStage1(data) {
+export async function setInvestorType(type) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
 
   const { error } = await supabaseAdmin
-    .from("issuers")
+    .from("investors")
+    .update({ type })
+    .eq("user_id", userId);
+
+  if (error) throw new Error("Failed to set investor type: " + error.message);
+  revalidatePath("/investor-portal/onboarding");
+  return { success: true };
+}
+
+export async function updateCurrentStep(step) {
+  const { userId } = await auth();
+  if (!userId) throw new Error("Unauthorized");
+
+  const { data } = await supabaseAdmin
+    .from("investors")
+    .select("current_step")
+    .eq("user_id", userId)
+    .single();
+
+  const dbStep = data?.current_step || 1;
+  const highestStep = Math.max(dbStep, step);
+
+  if (highestStep > dbStep) {
+    const { error } = await supabaseAdmin
+      .from("investors")
+      .update({ current_step: highestStep })
+      .eq("user_id", userId);
+    if (error) throw new Error("Failed to update current step: " + error.message);
+  }
+
+  return { success: true, current_step: highestStep };
+}
+
+export async function saveStage1Institutional(data) {
+  const { userId } = await auth();
+  if (!userId) throw new Error("Unauthorized");
+
+  const { error } = await supabaseAdmin
+    .from("investors")
     .update({
       legal_entity_name: data.legal_entity_name,
       country: data.country,
       city: data.city,
-      business_email: data.business_email,
-      business_phone_number: data.business_phone_number,
+      email: data.business_email, // mapping business email to email field
+      phone: data.business_phone_number, // mapping business phone to phone field
       business_type: data.business_type,
       license_authority: data.license_authority,
       trade_license_number: encrypt(data.trade_license_number),
+      net_worth: data.net_worth ? parseFloat(data.net_worth) : null,
+      investment_experience_years: data.investment_experience_years ? parseInt(data.investment_experience_years, 10) : null,
     })
     .eq("user_id", userId);
 
   if (error) throw new Error("Failed to save entity details: " + error.message);
-  revalidatePath("/issuer-portal/onboarding");
+  revalidatePath("/investor-portal/onboarding");
+  return { success: true };
+}
+
+export async function saveStage1Individual(data) {
+  const { userId } = await auth();
+  if (!userId) throw new Error("Unauthorized");
+
+  const { error } = await supabaseAdmin
+    .from("investors")
+    .update({
+      full_name: data.full_name,
+      email: data.personal_email,
+      phone: data.personal_phone_number,
+      country: data.country,
+      city: data.city,
+      nationality: data.nationality,
+      id_number: data.id_number ? encrypt(data.id_number) : null,
+      DOB: data.date_of_birth,
+      net_worth: data.net_worth ? parseFloat(data.net_worth) : null,
+      investment_experience_years: data.investment_experience_years ? parseInt(data.investment_experience_years, 10) : null,
+    })
+    .eq("user_id", userId);
+
+  if (error) throw new Error("Failed to save personal info: " + error.message);
+  revalidatePath("/investor-portal/onboarding");
   return { success: true };
 }
 
@@ -105,22 +175,20 @@ export async function saveStage2Rep(formData) {
     const filePath = `${userId}/${fileName}`;
 
     const { error: uploadError } = await supabaseAdmin.storage
-      .from("issuer_reps")
+      .from("investor_reps")
       .upload(filePath, file, { upsert: true });
 
     if (uploadError)
       throw new Error("Failed to upload image: " + uploadError.message);
 
-    // Get public URL or just store the path. Using public URL for simplicity, or we can use signed URLs later. Assuming private bucket, we store path.
-    // Wait, prompt said: "the url for this file should be stored in the id_url field"
     const {
       data: { publicUrl },
-    } = supabaseAdmin.storage.from("issuer_reps").getPublicUrl(filePath);
-    fileUrl = publicUrl; // Wait, if private, publicUrl won't work, but they just asked for "url". Let's store the full path or public URL. Actually, I'll store filePath so we can generate signed URLs later, but the prompt says "the url for this file should be stored in the id_url field". I'll store the publicUrl assuming they will make it readable or use signed URLs.
+    } = supabaseAdmin.storage.from("investor_reps").getPublicUrl(filePath);
+    fileUrl = publicUrl; 
   }
 
   const payload = {
-    issuer_id: userId,
+    investor_id: userId,
     full_name: formData.get("full_name"),
     id_type: formData.get("id_type"),
     id_number: encrypt(formData.get("id_number")),
@@ -141,20 +209,20 @@ export async function saveStage2Rep(formData) {
   let error;
   if (repId) {
     const { error: err } = await supabaseAdmin
-      .from("issuer_reps")
+      .from("investor_reps")
       .update(payload)
       .eq("id", repId)
-      .eq("issuer_id", userId);
+      .eq("investor_id", userId);
     error = err;
   } else {
     const { error: err } = await supabaseAdmin
-      .from("issuer_reps")
+      .from("investor_reps")
       .insert([payload]);
     error = err;
   }
 
   if (error) throw new Error("Failed to save representative: " + error.message);
-  revalidatePath("/issuer-portal/onboarding");
+  revalidatePath("/investor-portal/onboarding");
   return { success: true };
 }
 
@@ -163,32 +231,31 @@ export async function removeStage2Rep(repId) {
   if (!userId) throw new Error("Unauthorized");
 
   const { data, error: fetchErr } = await supabaseAdmin
-    .from("issuer_reps")
+    .from("investor_reps")
     .select("id_url")
     .eq("id", repId)
-    .eq("issuer_id", userId)
+    .eq("investor_id", userId)
     .single();
 
   if (fetchErr) throw new Error("Rep not found");
 
   // Remove file from storage if it exists
   if (data?.id_url) {
-    const path = data.id_url.split("/").pop(); // This assumes just the filename or path.
-    // In a real app we parse the URL correctly. Let's assume the path stored in DB is relative or just the file name.
+    const path = data.id_url.split("/").pop(); 
     await supabaseAdmin.storage
-      .from("issuer_reps")
+      .from("investor_reps")
       .remove([`${userId}/${path}`]);
   }
 
   const { error } = await supabaseAdmin
-    .from("issuer_reps")
+    .from("investor_reps")
     .delete()
     .eq("id", repId)
-    .eq("issuer_id", userId);
+    .eq("investor_id", userId);
 
   if (error)
     throw new Error("Failed to delete representative: " + error.message);
-  revalidatePath("/issuer-portal/onboarding");
+  revalidatePath("/investor-portal/onboarding");
   return { success: true };
 }
 
@@ -209,7 +276,7 @@ export async function saveStage3Doc(formData) {
   const filePath = `${userId}/${fileName}`;
 
   const { error: uploadError } = await supabaseAdmin.storage
-    .from("issuer_docs")
+    .from("investor_docs")
     .upload(filePath, file, { upsert: true });
 
   if (uploadError)
@@ -217,28 +284,26 @@ export async function saveStage3Doc(formData) {
 
   const {
     data: { publicUrl },
-  } = supabaseAdmin.storage.from("issuer_docs").getPublicUrl(filePath);
+  } = supabaseAdmin.storage.from("investor_docs").getPublicUrl(filePath);
   const fileUrl = publicUrl;
 
-  // Upsert pattern (we might already have this doc_type, so we update or insert)
   const { data: existing } = await supabaseAdmin
-    .from("issuer_docs")
+    .from("investor_docs")
     .select("id, url")
-    .eq("issuer_id", userId)
+    .eq("investor_id", userId)
     .eq("doc_type", docType)
     .single();
 
   if (existing) {
-    // Delete old file if updating
     if (existing.url && existing.url !== fileUrl) {
       const oldPath = existing.url.split("/").pop();
       await supabaseAdmin.storage
-        .from("issuer_docs")
+        .from("investor_docs")
         .remove([`${userId}/${oldPath}`]);
     }
 
     const { error } = await supabaseAdmin
-      .from("issuer_docs")
+      .from("investor_docs")
       .update({
         document_password: password ? encrypt(password) : null,
         url: fileUrl,
@@ -247,9 +312,9 @@ export async function saveStage3Doc(formData) {
       .eq("id", existing.id);
     if (error) throw new Error("Failed to update doc");
   } else {
-    const { error } = await supabaseAdmin.from("issuer_docs").insert([
+    const { error } = await supabaseAdmin.from("investor_docs").insert([
       {
-        issuer_id: userId,
+        investor_id: userId,
         doc_type: docType,
         document_password: password ? encrypt(password) : null,
         url: fileUrl,
@@ -260,7 +325,16 @@ export async function saveStage3Doc(formData) {
     if (error) throw new Error("Failed to insert doc: " + error.message);
   }
 
-  revalidatePath("/issuer-portal/onboarding");
+  if (docType === "trade_certificate") {
+    const { error: updateErr } = await supabaseAdmin
+      .from("investors")
+      .update({ license_verification_status: "pending" })
+      .eq("user_id", userId);
+    
+    if (updateErr) throw new Error("Failed to update license verification status");
+  }
+
+  revalidatePath("/investor-portal/onboarding");
   return { success: true };
 }
 
@@ -269,14 +343,14 @@ export async function updateDocPassword(docType, password) {
   if (!userId) throw new Error("Unauthorized");
 
   const { error } = await supabaseAdmin
-    .from("issuer_docs")
+    .from("investor_docs")
     .update({ document_password: password ? encrypt(password) : null })
-    .eq("issuer_id", userId)
+    .eq("investor_id", userId)
     .eq("doc_type", docType);
 
   if (error) throw new Error("Failed to update document password: " + error.message);
   
-  revalidatePath("/issuer-portal/onboarding");
+  revalidatePath("/investor-portal/onboarding");
   return { success: true };
 }
 
@@ -285,7 +359,7 @@ export async function saveStage4Banking(bankDetails) {
   if (!userId) throw new Error("Unauthorized");
 
   const { error } = await supabaseAdmin
-    .from("issuers")
+    .from("investors")
     .update({
       bank_details: { ...bankDetails, iban: encrypt(bankDetails.iban) },
       bank_verification_status: "pending",
@@ -293,7 +367,7 @@ export async function saveStage4Banking(bankDetails) {
     .eq("user_id", userId);
 
   if (error) throw new Error("Failed to save bank details: " + error.message);
-  revalidatePath("/issuer-portal/onboarding");
+  revalidatePath("/investor-portal/onboarding");
   return { success: true };
 }
 
@@ -306,7 +380,7 @@ export async function submitApplication() {
   const userAgent = headersList.get("user-agent") || "unknown";
 
   const { error } = await supabaseAdmin
-    .from("issuers")
+    .from("investors")
     .update({
       onboarding_status: "pending review",
       consent_timestamp: new Date().toISOString(),
@@ -316,30 +390,6 @@ export async function submitApplication() {
     .eq("user_id", userId);
 
   if (error) throw new Error("Failed to submit application: " + error.message);
-  revalidatePath("/issuer-portal/onboarding");
+  revalidatePath("/investor-portal/onboarding");
   return { success: true };
-}
-
-export async function updateCurrentStep(step) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-
-  const { data } = await supabaseAdmin
-    .from("issuers")
-    .select("current_step")
-    .eq("user_id", userId)
-    .single();
-
-  const dbStep = data?.current_step || 1;
-  const highestStep = Math.max(dbStep, step);
-
-  if (highestStep > dbStep) {
-    const { error } = await supabaseAdmin
-      .from("issuers")
-      .update({ current_step: highestStep })
-      .eq("user_id", userId);
-    if (error) throw new Error("Failed to update current step: " + error.message);
-  }
-
-  return { success: true, current_step: highestStep };
 }
