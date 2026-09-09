@@ -6,10 +6,10 @@ import slugify from "slugify";
 
 // Pre-wizard project creation
 export async function createProjectDraft(title) {
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
 
-  if (!userId) {
-    throw new Error("Unauthorized");
+  if (!userId || !orgId) {
+    throw new Error("Unauthorized: Organization workspace required for Issuers.");
   }
 
   // Generate a temporary slug just so the DB doesn't complain if it's unique, but we will overwrite it in Step 1
@@ -38,7 +38,7 @@ export async function createProjectDraft(title) {
   const { data, error } = await supabaseAdmin
     .from("projects")
     .insert({
-      issuer_id: userId,
+      issuer_id: orgId,
       title: title,
       slug: currentSlug,
       status: "draft",
@@ -56,10 +56,10 @@ export async function createProjectDraft(title) {
 
 // Wizard Step update
 export async function updateProjectDraft(projectId, data, step) {
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
 
-  if (!userId) {
-    throw new Error("Unauthorized");
+  if (!userId || !orgId) {
+    throw new Error("Unauthorized: Organization workspace required for Issuers.");
   }
 
   // Confirm ownership and draft status
@@ -73,7 +73,7 @@ export async function updateProjectDraft(projectId, data, step) {
     throw new Error("Project not found.");
   }
 
-  if (project.issuer_id !== userId) {
+  if (project.issuer_id !== orgId) {
     throw new Error("Unauthorized: Project ownership mismatch.");
   }
 
@@ -155,7 +155,7 @@ export async function updateProjectDraft(projectId, data, step) {
         } else {
           const res = await supabaseAdmin.from("spv_details").insert({
             project_id: projectId,
-            issuer_id: userId,
+            issuer_id: orgId,
             spv_legal_name: data.spv_legal_name,
             registration_authority: data.registration_authority,
             registration_number: data.registration_number,
@@ -196,7 +196,7 @@ export async function updateProjectDraft(projectId, data, step) {
             cap_table_doc_id: data.cap_table_doc_id,
           })
           .eq("project_id", projectId)
-          .eq("issuer_id", userId);
+          .eq("issuer_id", orgId);
 
         updateError = error;
       }
@@ -235,10 +235,10 @@ export async function updateProjectDraft(projectId, data, step) {
 
 // Final submission
 export async function submitProjectForReview(projectId) {
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
 
-  if (!userId) {
-    throw new Error("Unauthorized");
+  if (!userId || !orgId) {
+    throw new Error("Unauthorized: Organization workspace required for Issuers.");
   }
 
   // Confirm ownership and draft status
@@ -257,7 +257,7 @@ export async function submitProjectForReview(projectId) {
     throw new Error("Project not found.");
   }
 
-  if (project.issuer_id !== userId) {
+  if (project.issuer_id !== orgId) {
     throw new Error("Unauthorized: Project ownership mismatch.");
   }
 
@@ -334,8 +334,8 @@ export async function submitProjectForReview(projectId) {
 }
 
 export async function deleteProjectDoc(projectId, fileUrl) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  const { userId, orgId } = await auth();
+  if (!userId || !orgId) throw new Error("Unauthorized: Organization workspace required for Issuers.");
 
   const { data: project } = await supabaseAdmin
     .from("projects")
@@ -343,7 +343,7 @@ export async function deleteProjectDoc(projectId, fileUrl) {
     .eq("id", projectId)
     .single();
 
-  if (!project || project.issuer_id !== userId) {
+  if (!project || project.issuer_id !== orgId) {
     throw new Error("Unauthorized: Project ownership mismatch.");
   }
   if (project.status !== "draft") {
@@ -370,7 +370,7 @@ export async function deleteProjectDoc(projectId, fileUrl) {
       .from("project_docs")
       .delete()
       .eq("file_url", fileUrl)
-      .eq("issuer_id", userId);
+      .eq("issuer_id", orgId);
 
     if (dbError) {
       console.error("Error deleting from DB:", dbError);
@@ -382,8 +382,8 @@ export async function deleteProjectDoc(projectId, fileUrl) {
 }
 
 export async function deleteProjectMedia(projectId, fileUrl) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  const { userId, orgId } = await auth();
+  if (!userId || !orgId) throw new Error("Unauthorized: Organization workspace required for Issuers.");
 
   const { data: project } = await supabaseAdmin
     .from("projects")
@@ -391,7 +391,7 @@ export async function deleteProjectMedia(projectId, fileUrl) {
     .eq("id", projectId)
     .single();
 
-  if (!project || project.issuer_id !== userId) {
+  if (!project || project.issuer_id !== orgId) {
     throw new Error("Unauthorized: Project ownership mismatch.");
   }
   if (project.status !== "draft") {
@@ -418,7 +418,7 @@ export async function deleteProjectMedia(projectId, fileUrl) {
       .from("project_media")
       .delete()
       .eq("url", fileUrl)
-      .eq("issuer_id", userId);
+      .eq("issuer_id", orgId);
 
     if (dbError) {
       console.error("Error deleting from DB:", dbError);

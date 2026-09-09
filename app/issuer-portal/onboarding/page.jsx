@@ -1,18 +1,20 @@
 import { getOnboardingData } from "@/app/actions/issuer-onboarding";
 import OnboardingFlow from "./components/OnboardingFlow";
+import OrgGate from "@/app/components/auth/OrgGate";
 import Link from "next/link";
 import { CheckCircle } from "lucide-react";
 
 export default async function IssuerOnboardingPage() {
-  let data = { issuer: {}, reps: [], docs: [] };
-  
+  let data = { issuer: {}, reps: [], docs: [], needsOrg: false };
+
   try {
     data = await getOnboardingData();
   } catch (error) {
     console.error("Error fetching onboarding data:", error);
   }
 
-  const isPendingReview = data.issuer.onboarding_status && data.issuer.onboarding_status !== "incomplete";
+  const isPendingReview =
+    data.issuer.onboarding_status && data.issuer.onboarding_status !== "incomplete";
 
   if (isPendingReview) {
     return (
@@ -21,9 +23,9 @@ export default async function IssuerOnboardingPage() {
           <CheckCircle className="mx-auto h-16 w-16 text-[#064e3b] mb-6" />
           <h1 className="text-2xl font-bold text-gray-900 mb-4">Under Review</h1>
           <p className="text-gray-600 mb-8">
-            Your onboarding has been complete and is under review. We will notify you once the review process is complete.
+            Your onboarding has been completed and is under review. We will notify you once the review process is complete.
           </p>
-          <Link 
+          <Link
             href="/issuer-portal"
             className="inline-flex justify-center items-center py-3 px-6 border border-transparent rounded-md shadow-sm text-md font-medium text-white bg-[#064e3b] hover:bg-[#064e3b]/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#064e3b] transition-colors"
           >
@@ -40,11 +42,16 @@ export default async function IssuerOnboardingPage() {
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-extrabold text-[#064e3b]">Issuer Onboarding</h1>
           <p className="mt-2 text-sm text-gray-600">
-            Please complete the following sections to set up your workspace.
+            Issuers are strictly organization-based. Please select or create an active organization workspace to proceed.
           </p>
         </div>
-        
-        <OnboardingFlow initialData={data} />
+
+        <OrgGate
+          title="Issuer Organization Required"
+          subtitle="To create campaigns and onboard as an Issuer, please select or create your corporate organization."
+        >
+          <OnboardingFlow initialData={data} />
+        </OrgGate>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { getOnboardingData } from "@/app/actions/investor-onboarding";
 import OnboardingFlow from "./components/OnboardingFlow";
 import TypeSelector from "./components/TypeSelector";
+import OrgGate from "@/app/components/auth/OrgGate";
 import Link from "next/link";
 import { CheckCircle } from "lucide-react";
 
@@ -52,7 +53,16 @@ export default async function InvestorOnboardingPage() {
           </p>
         </div>
         
-        <OnboardingFlow initialData={data} type={data.investor.type} />
+        {data.investor.type === "institutional" ? (
+          <OrgGate
+            title="Institutional Organization Required"
+            subtitle="Institutional investor accounts must be linked to an active organization workspace. Please select or create your organization."
+          >
+            <OnboardingFlow initialData={data} type={data.investor.type} />
+          </OrgGate>
+        ) : (
+          <OnboardingFlow initialData={data} type={data.investor.type} />
+        )}
       </div>
     </div>
   );

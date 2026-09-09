@@ -1,6 +1,6 @@
 import { Webhook } from "svix";
 import { WebhookEvent } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "../../../../lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase";
 
 export async function POST(req: Request) {
   const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
@@ -10,19 +10,24 @@ export async function POST(req: Request) {
     return new Response("Server Error", { status: 500 });
   }
 
-  // Get the headers from the standard Request object
+  if (!supabaseAdmin) {
+    console.error("Missing Supabase Service Role configuration");
+    return new Response("Server Error - Database Client Unconfigured", { status: 500 });
+  }
+
+  // Get headers from standard Request object
   const svix_id = req.headers.get("svix-id");
   const svix_timestamp = req.headers.get("svix-timestamp");
   const svix_signature = req.headers.get("svix-signature");
 
   if (!svix_id || !svix_timestamp || !svix_signature) {
-    return new Response("Error occured -- no svix headers", {
+    return new Response("Error occurred -- missing svix headers", {
       status: 400,
     });
   }
 
-  // Get the body
-  let payload;
+  // Get body
+  let payload: any;
   try {
     payload = await req.json();
   } catch (err) {
@@ -30,13 +35,10 @@ export async function POST(req: Request) {
   }
 
   const body = JSON.stringify(payload);
-
-  // Create a new Svix instance with your secret.
   const wh = new Webhook(WEBHOOK_SECRET);
-
   let evt: WebhookEvent;
 
-  // Verify the payload with the headers
+  // Verify payload signature
   try {
     evt = wh.verify(body, {
       "svix-id": svix_id,
@@ -45,15 +47,16 @@ export async function POST(req: Request) {
     }) as WebhookEvent;
   } catch (err) {
     console.error("Error verifying webhook:", err);
-    return new Response("Error occured", {
-      status: 400,
-    });
+    return new Response("Webhook verification failed", { status: 400 });
   }
 
-  // Handle the webhook
+  // Process event type
   try {
     const eventType = evt.type;
 
+    // ----------------------------------------------------
+    // 1. User Created
+    // ----------------------------------------------------
     if (eventType === "user.created") {
       const { id, email_addresses, first_name, last_name, public_metadata, unsafe_metadata } =
         evt.data;
@@ -63,26 +66,34 @@ export async function POST(req: Request) {
       const firstName = first_name || "";
       const lastName = last_name || "";
 
-      const data = {
+      const userData = {
         user_id: id,
         email,
         first_name: firstName,
         last_name: lastName,
-        role: role || 'user',
+        role: role || "user",
       };
 
-      const { error: userError } = await supabaseAdmin.from('users').insert([data]);
+      const { error: userError } = await supabaseAdmin
+        .from("users")
+        .upsert([userData], { onConflict: "user_id" });
+
       if (userError) throw userError;
 
-      if (role === 'investor') {
-        const { error } = await supabaseAdmin.from('investors').insert([{ user_id: id }]);
-        if (error) throw error;
-      } else if (role === 'issuer') {
-        const { error } = await supabaseAdmin.from('issuers').insert([{ user_id: id }]);
-        if (error) throw error;
+      if (role === "investor") {
+        await supabaseAdmin
+          .from("investors")
+          .upsert([{ user_id: id }], { onConflict: "user_id" });
+      } else if (role === "issuer") {
+        await supabaseAdmin
+          .from("issuers")
+          .upsert([{ user_id: id }], { onConflict: "user_id" });
       }
     }
 
+    // ----------------------------------------------------
+    // 2. User Updated
+    // ----------------------------------------------------
     if (eventType === "user.updated") {
       const { id, email_addresses, first_name, last_name, public_metadata, unsafe_metadata } =
         evt.data;
@@ -92,24 +103,126 @@ export async function POST(req: Request) {
       const firstName = first_name || "";
       const lastName = last_name || "";
 
-      const data: any = {
+      const updateData: any = {
         email,
         first_name: firstName,
         last_name: lastName,
+        updated_at: new Date().toISOString(),
       };
 
       if (role) {
-        data.role = role;
+        updateData.role = role;
       }
 
-      const { error } = await supabaseAdmin.from('users').update(data).eq('user_id', id);
+      const { error } = await supabaseAdmin
+        .from("users")
+        .update(updateData)
+        .eq("user_id", id);
+
       if (error) throw error;
     }
 
-    if (eventType === 'user.deleted') {
+    // ----------------------------------------------------
+    // 3. User Deleted
+    // ----------------------------------------------------
+    if (eventType === "user.deleted") {
       const { id } = evt.data;
       if (id) {
-        await supabaseAdmin.from('users').delete().eq('user_id', id);
+        // Delete user's memberships first, then delete user record
+        await supabaseAdmin.from("memberships").delete().eq("user_id", id);
+        await supabaseAdmin.from("users").delete().eq("user_id", id);
+      }
+    }
+
+    // ----------------------------------------------------
+    // 4. Organization Created
+    // ----------------------------------------------------
+    if (eventType === "organization.created") {
+      const { id, name, created_by } = evt.data;
+
+      const orgData = {
+        org_id: id,
+        org_name: name || id,
+        created_by: created_by || null,
+        type: "investor",
+      };
+
+      const { error } = await supabaseAdmin
+        .from("organizations")
+        .upsert([orgData], { onConflict: "org_id" });
+
+      if (error) {
+        console.error("Error syncing organization.created:", error);
+        throw error;
+      }
+    }
+
+    // ----------------------------------------------------
+    // 5. Organization Deleted
+    // ----------------------------------------------------
+    if (eventType === "organization.deleted") {
+      const { id } = evt.data;
+      if (id) {
+        // Delete organization memberships first, then delete organization record
+        await supabaseAdmin.from("memberships").delete().eq("org_id", id);
+        await supabaseAdmin.from("organizations").delete().eq("org_id", id);
+      }
+    }
+
+    // ----------------------------------------------------
+    // 6. Organization Membership Created / Updated
+    // ----------------------------------------------------
+    if (
+      eventType === "organizationMembership.created" ||
+      eventType === "organizationMembership.updated"
+    ) {
+      const { id: mem_id, organization, public_user_data, role } = evt.data;
+      const org_id = organization?.id;
+      const user_id = public_user_data?.user_id;
+
+      if (org_id && user_id) {
+        // Check if membership already exists to only set role to admin when first being created
+        const { data: existing } = await supabaseAdmin
+          .from("memberships")
+          .select("id, role")
+          .eq("org_id", org_id)
+          .eq("user_id", user_id)
+          .maybeSingle();
+
+        const membershipData = {
+          org_id,
+          membership_id: mem_id || `mem_${org_id}_${user_id}`,
+          user_id,
+          role: existing ? (role || existing.role) : "admin",
+        };
+
+        const { error } = await supabaseAdmin
+          .from("memberships")
+          .upsert([membershipData], { onConflict: "org_id,user_id" });
+
+        if (error) {
+          console.error(`Error syncing ${eventType}:`, error);
+          throw error;
+        }
+      }
+    }
+
+    // ----------------------------------------------------
+    // 7. Organization Membership Deleted / membership.deleted
+    // ----------------------------------------------------
+    if (
+      eventType === "organizationMembership.deleted" ||
+      (eventType as string) === "membership.deleted"
+    ) {
+      const { id: mem_id, organization, public_user_data } = evt.data as any;
+      const org_id = organization?.id;
+      const user_id = public_user_data?.user_id;
+
+      if (mem_id) {
+        await supabaseAdmin.from("memberships").delete().eq("membership_id", mem_id);
+      }
+      if (org_id && user_id) {
+        await supabaseAdmin.from("memberships").delete().match({ org_id, user_id });
       }
     }
 
@@ -117,11 +230,11 @@ export async function POST(req: Request) {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
-  } catch (error) {
-    console.error("Database sync error:", error);
+  } catch (error: any) {
+    console.error("Clerk Webhook Database Sync Error:", error);
     return new Response(
-      JSON.stringify({ success: false, error: "Database sync error" }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
+      JSON.stringify({ success: false, error: error?.message || "Database sync error" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
 }

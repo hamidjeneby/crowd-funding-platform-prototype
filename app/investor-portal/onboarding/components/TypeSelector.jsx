@@ -17,7 +17,7 @@ export default function TypeSelector() {
       await setInvestorType(type);
       router.refresh();
     } catch (err) {
-      setError(err.message);
+      setError("An error occurred while setting your investor type. Please try again.");
       setLoadingType(null);
     }
   };

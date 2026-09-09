@@ -7,9 +7,9 @@ import { supabaseAdmin } from "@/lib/supabase";
  * Ensures the user is authorized to edit the project draft.
  */
 async function verifyProjectAccess(projectId) {
-  const { userId } = await auth();
-  if (!userId) {
-    throw new Error("Unauthorized");
+  const { userId, orgId } = await auth();
+  if (!userId || !orgId) {
+    throw new Error("Unauthorized: Organization workspace required for Issuers.");
   }
 
   const { data: project, error: projectError } = await supabaseAdmin
@@ -21,14 +21,14 @@ async function verifyProjectAccess(projectId) {
   if (projectError || !project) {
     throw new Error("Project not found");
   }
-  if (project.issuer_id !== userId) {
+  if (project.issuer_id !== orgId) {
     throw new Error("Unauthorized: Project ownership mismatch");
   }
   if (project.status !== "draft") {
     throw new Error("Cannot modify files: Project is not in draft status");
   }
 
-  return { userId };
+  return { userId, orgId };
 }
 
 /**
@@ -38,7 +38,7 @@ async function verifyProjectAccess(projectId) {
  * @param {Array} files - Array of { tempId, category ('document'|'media'), type, ext, isCover }
  */
 export async function authorizeUploadBatch(projectId, files) {
-  await verifyProjectAccess(projectId);
+  const { orgId } = await verifyProjectAccess(projectId);
 
   const results = [];
 
@@ -49,17 +49,17 @@ export async function authorizeUploadBatch(projectId, files) {
     if (file.category === "document") {
       bucket = "project_docs";
       if (file.type === "other") {
-        path = `${projectId}/other_${crypto.randomUUID()}.${file.ext}`;
+        path = `${orgId}/other_${crypto.randomUUID()}.${file.ext}`;
       } else {
-        path = `${projectId}/${file.type}_${crypto.randomUUID()}.${file.ext}`;
+        path = `${orgId}/${file.type}_${crypto.randomUUID()}.${file.ext}`;
       }
     } else if (file.category === "media") {
       if (file.isCover) {
         bucket = "cover_img";
-        path = `${crypto.randomUUID()}.${file.ext}`; // No project folder for public cover_img
+        path = `${orgId}/${crypto.randomUUID()}.${file.ext}`;
       } else {
         bucket = "project_media";
-        path = `${projectId}/${crypto.randomUUID()}.${file.ext}`;
+        path = `${orgId}/${crypto.randomUUID()}.${file.ext}`;
       }
     } else {
       throw new Error(`Invalid file category: ${file.category}`);
@@ -92,7 +92,7 @@ export async function authorizeUploadBatch(projectId, files) {
  * @param {Array} uploadedFiles - Array of { category, type, bucket, path, display_order, isCover }
  */
 export async function recordSuccessfulUploads(projectId, uploadedFiles) {
-  const { userId } = await verifyProjectAccess(projectId);
+  const { userId, orgId } = await verifyProjectAccess(projectId);
   const results = { documents: 0, media: 0, cover: false };
 
   for (const file of uploadedFiles) {
@@ -105,7 +105,7 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
         // Always insert for 'other'
         await supabaseAdmin.from("project_docs").insert({
           project_id: projectId,
-          issuer_id: userId,
+          issuer_id: orgId,
           doc_type: "other",
           file_url: publicUrl,
           uploaded_by: userId,
@@ -117,7 +117,7 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
         
         await supabaseAdmin.from("project_docs").insert({
           project_id: projectId,
-          issuer_id: userId,
+          issuer_id: orgId,
           doc_type: file.type,
           file_url: publicUrl,
           uploaded_by: userId,
@@ -136,7 +136,7 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
         // Insert into project_media
         await supabaseAdmin.from("project_media").insert({
           project_id: projectId,
-          issuer_id: userId,
+          issuer_id: orgId,
           media_type: file.type,
           url: publicUrl,
           display_order: file.display_order || 0,
@@ -153,19 +153,19 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
  * Removes a file from storage and database.
  */
 export async function deleteProjectFile(projectId, fileUrl, category) {
-  const { userId } = await verifyProjectAccess(projectId);
+  const { userId, orgId } = await verifyProjectAccess(projectId);
 
   if (category === "document") {
     const urlParts = fileUrl.split("/project_docs/");
     if (urlParts.length === 2) {
       await supabaseAdmin.storage.from("project_docs").remove([urlParts[1]]);
-      await supabaseAdmin.from("project_docs").delete().eq("file_url", fileUrl).eq("issuer_id", userId);
+      await supabaseAdmin.from("project_docs").delete().eq("file_url", fileUrl).eq("issuer_id", orgId);
     }
   } else if (category === "media") {
     const urlParts = fileUrl.split("/project_media/");
     if (urlParts.length === 2) {
       await supabaseAdmin.storage.from("project_media").remove([urlParts[1]]);
-      await supabaseAdmin.from("project_media").delete().eq("url", fileUrl).eq("issuer_id", userId);
+      await supabaseAdmin.from("project_media").delete().eq("url", fileUrl).eq("issuer_id", orgId);
     }
   } else if (category === "cover") {
     const urlParts = fileUrl.split("/cover_img/");

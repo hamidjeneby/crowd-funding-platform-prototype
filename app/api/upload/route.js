@@ -1,11 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { NextResponse } from "next/server";
+
 export async function POST(request) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { userId, orgId } = await auth();
+    if (!userId || !orgId) {
+      return NextResponse.json({ error: "Unauthorized: Organization workspace required" }, { status: 401 });
     }
 
     const formData = await request.formData();
@@ -34,7 +35,7 @@ export async function POST(request) {
       console.error("Upload error - Project lookup failed. projectId:", projectId, "error:", projectError);
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
-    if (project.issuer_id !== userId) {
+    if (project.issuer_id !== orgId) {
       return NextResponse.json(
         { error: "Unauthorized: Project ownership mismatch" },
         { status: 403 },
@@ -61,13 +62,13 @@ export async function POST(request) {
             .from("project_docs")
             .delete()
             .eq("file_url", oldFileUrl)
-            .eq("issuer_id", userId);
+            .eq("issuer_id", orgId);
         } else if (bucket === "project_media") {
           await supabaseAdmin
             .from("project_media")
             .delete()
             .eq("url", oldFileUrl)
-            .eq("issuer_id", userId);
+            .eq("issuer_id", orgId);
         }
       }
     }
@@ -75,7 +76,7 @@ export async function POST(request) {
     // Upload new file
     const fileExt = file.name.split(".").pop();
     const fileName = `${crypto.randomUUID()}.${fileExt}`;
-    const filePath = `${projectId}/${fileName}`;
+    const filePath = `${orgId}/${fileName}`;
 
     const buffer = Buffer.from(await file.arrayBuffer());
 
@@ -105,7 +106,7 @@ export async function POST(request) {
         .from("project_docs")
         .insert({
           project_id: projectId,
-          issuer_id: userId,
+          issuer_id: orgId,
           doc_type: docType,
           file_url: publicUrl,
           uploaded_by: userId,
@@ -134,7 +135,7 @@ export async function POST(request) {
         .from("project_media")
         .insert({
           project_id: projectId,
-          issuer_id: userId,
+          issuer_id: orgId,
           media_type: mediaType,
           url: publicUrl,
           display_order: nextOrder,
