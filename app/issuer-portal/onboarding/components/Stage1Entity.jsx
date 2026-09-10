@@ -44,6 +44,8 @@ export default function Stage1Entity({ data, onSave, onNext }) {
   const [isSaving, setIsSaving] = useState(false);
   const [countries, setCountries] = useState([]);
   const [cities, setCities] = useState([]);
+  const [formError, setFormError] = useState(null);
+  const [successMsg, setSuccessMsg] = useState(null);
 
   const { register, handleSubmit, control, watch, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(stage1Schema),
@@ -85,6 +87,8 @@ export default function Stage1Entity({ data, onSave, onNext }) {
 
   const onSubmit = async (formData) => {
     setIsSaving(true);
+    setFormError(null);
+    setSuccessMsg(null);
     try {
       const finalData = { ...formData };
       if (finalData.business_type === "Other") {
@@ -102,7 +106,7 @@ export default function Stage1Entity({ data, onSave, onNext }) {
       onNext();
     } catch (error) {
       console.error(error);
-      alert(error.message);
+      setFormError("An unexpected error occurred while saving. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -123,13 +127,15 @@ export default function Stage1Entity({ data, onSave, onNext }) {
     delete finalData.other_license_authority;
 
     setIsSaving(true);
+    setFormError(null);
+    setSuccessMsg(null);
     try {
       await saveStage1(finalData);
       onSave(finalData);
-      alert("Draft saved successfully.");
+      setSuccessMsg("Draft saved successfully.");
     } catch (error) {
       console.error(error);
-      alert(error.message);
+      setFormError("An unexpected error occurred while saving draft. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -137,6 +143,16 @@ export default function Stage1Entity({ data, onSave, onNext }) {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      {formError && (
+        <div className="p-4 rounded-lg bg-red-50 text-red-700 text-sm border border-red-200">
+          {formError}
+        </div>
+      )}
+      {successMsg && (
+        <div className="p-4 rounded-lg bg-emerald-50 text-emerald-700 text-sm border border-emerald-200">
+          {successMsg}
+        </div>
+      )}
       <p className="text-sm text-gray-500 mb-4">
         Fields marked with <span className="text-red-500">*</span> are required.
       </p>

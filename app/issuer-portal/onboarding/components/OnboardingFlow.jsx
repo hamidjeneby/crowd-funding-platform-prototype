@@ -8,6 +8,8 @@ import Stage3Docs from "./Stage3Docs";
 import Stage4Banking from "./Stage4Banking";
 import Stage5Review from "./Stage5Review";
 import { useRouter } from "next/navigation";
+import { useClerk } from "@clerk/nextjs";
+import { Users, UserPlus } from "lucide-react";
 import { submitApplication, updateCurrentStep } from "@/app/actions/issuer-onboarding";
 
 const STEPS = [
@@ -20,9 +22,11 @@ const STEPS = [
 
 export default function OnboardingFlow({ initialData }) {
   const router = useRouter();
+  const clerk = useClerk();
   const [currentStep, setCurrentStep] = useState(1);
   const [completedSteps, setCompletedSteps] = useState([]);
-  
+  const [flowError, setFlowError] = useState(null);
+
   // Data states
   const [issuerData, setIssuerData] = useState(initialData.issuer || {});
   const [repsData, setRepsData] = useState(initialData.reps || []);
@@ -63,8 +67,6 @@ export default function OnboardingFlow({ initialData }) {
     if (issuerData.bank_details) {
       completed.push(4);
     }
-
-    // Step 5 check (we just use the fact they submitted as completion, but since we are loading, we can't be strictly sure. Wait, if all 4 are done, we can just jump to the first incomplete step)
     
     setCompletedSteps(completed);
   }, [issuerData, repsData, docsData]);
@@ -115,8 +117,39 @@ export default function OnboardingFlow({ initialData }) {
 
   return (
     <div className="bg-white rounded-xl shadow-lg border border-[#064e3b]/10 p-6 sm:p-10">
+      {/* Organization Team Collaboration Banner */}
+      <div className="mb-8 p-4 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-[#064e3b] text-white shadow-xs">
+            <Users className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-[#064e3b]">
+              Collaborate on Onboarding
+            </h4>
+            <p className="text-xs text-gray-600">
+              Invite team members or representatives to help complete entity details & document uploads.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => clerk.openOrganizationProfile()}
+          className="inline-flex items-center justify-center px-4 py-2 bg-[#064e3b] hover:bg-[#064e3b]/90 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex-shrink-0"
+        >
+          <UserPlus className="w-4 h-4 mr-2" />
+          Manage & Invite Team
+        </button>
+      </div>
+
       <ProgressBar currentStep={currentStep} steps={STEPS} completedSteps={completedSteps} />
       
+      {flowError && (
+        <div className="mt-6 p-4 rounded-lg bg-red-50 text-red-700 text-sm border border-red-200">
+          {flowError}
+        </div>
+      )}
+
       <div className="mt-8">
         {currentStep === 1 && (
           <Stage1Entity 
@@ -156,15 +189,14 @@ export default function OnboardingFlow({ initialData }) {
             docsData={docsData}
             onEditSection={handleEditSection}
             onSubmit={async () => {
+              setFlowError(null);
               try {
                 await submitApplication();
-                // We don't push manually here since revalidatePath on the server will trigger a refresh 
-                // and the page.jsx will see onboarding_status !== 'incomplete' and render the pending UI.
-                // But just in case, we can force a refresh
+                window.scrollTo({ top: 0, behavior: "smooth" });
                 router.refresh();
               } catch (err) {
                 console.error(err);
-                alert(err.message);
+                setFlowError("An unexpected error occurred while submitting your application. Please try again.");
               }
             }}
           />

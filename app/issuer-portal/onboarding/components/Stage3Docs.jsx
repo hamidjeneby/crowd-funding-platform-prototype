@@ -35,13 +35,16 @@ export default function Stage3Docs({ docs, onUpdate, onNext, onBack }) {
     bank_verification_letter: useRef(),
   };
 
+  const [error, setError] = useState(null);
+
   // Helper to check if a doc has already been uploaded previously
   const isUploaded = (docId) => docs.some(d => d.doc_type === docId);
 
   const handleFileChange = (docId, file) => {
+    setError(null);
     if (file) {
       if (!file.type.match(/^(image\/.*|application\/pdf)$/)) {
-        alert("Only images or PDF files are allowed");
+        setError("Only images or PDF files are allowed.");
         return;
       }
       setFiles(prev => ({ ...prev, [docId]: file }));
@@ -49,11 +52,12 @@ export default function Stage3Docs({ docs, onUpdate, onNext, onBack }) {
   };
 
   const handleSaveAndContinue = async () => {
+    setError(null);
     // Validate that all required docs are present (either in state or already uploaded)
     const missing = REQUIRED_DOCS.filter(d => !files[d.id] && !isUploaded(d.id));
     
     if (missing.length > 0) {
-      alert(`Please upload all required documents. Missing: ${missing.map(m => m.label).join(", ")}`);
+      setError(`Please upload all required documents. Missing: ${missing.map(m => m.label).join(", ")}`);
       return;
     }
 
@@ -89,13 +93,18 @@ export default function Stage3Docs({ docs, onUpdate, onNext, onBack }) {
       onNext();
     } catch (err) {
       console.error(err);
-      alert(err.message);
+      setError("An unexpected error occurred while saving documents. Please try again.");
       setIsSaving(false);
     }
   };
 
   return (
     <div className="space-y-8">
+      {error && (
+        <div className="p-4 rounded-lg bg-red-50 text-red-700 text-sm border border-red-200">
+          {error}
+        </div>
+      )}
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-2">Document Upload</h3>
         <p className="text-sm text-gray-500">Please upload the required corporate documents. Only PDF and Image files are accepted.</p>

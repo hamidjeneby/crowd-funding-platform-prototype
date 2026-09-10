@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle, FileText, User, Loader2 } from "lucide-react";
+import { CheckCircle, FileText, User, Loader2, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
 export default function Stage5Review({
@@ -12,8 +12,7 @@ export default function Stage5Review({
   onSubmit,
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [consent1, setConsent1] = useState(false);
-  const [consent2, setConsent2] = useState(false);
+  const [hasAttested, setHasAttested] = useState(false);
 
   return (
     <div className="space-y-8">
@@ -161,74 +160,96 @@ export default function Stage5Review({
           <h4 className="text-lg font-medium text-gray-900 mb-4 border-b pb-2">
             Banking Details
           </h4>
-          {issuerData.bank_details && (
-            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4 text-sm">
-              <div>
-                <dt className="text-gray-500">Bank Name</dt>
-                <dd className="font-medium text-gray-900">
-                  {issuerData.bank_details.bank_name}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-gray-500">Account Holder</dt>
-                <dd className="font-medium text-gray-900">
-                  {issuerData.bank_details.account_holder_name}
-                </dd>
-              </div>
-              <div className="sm:col-span-2">
-                <dt className="text-gray-500">IBAN</dt>
-                <dd className="font-medium text-gray-900 font-mono tracking-wider">
-                  {issuerData.bank_details.iban}
-                </dd>
-              </div>
-            </dl>
-          )}
+          {(() => {
+            const bankDetails = issuerData.bank_details
+              ? typeof issuerData.bank_details === "string"
+                ? JSON.parse(issuerData.bank_details)
+                : issuerData.bank_details
+              : null;
+
+            return bankDetails ? (
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4 text-sm">
+                <div>
+                  <dt className="text-gray-500">Bank Name</dt>
+                  <dd className="font-medium text-gray-900">
+                    {bankDetails.bank_name || "-"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Account Name (Beneficiary)</dt>
+                  <dd className="font-medium text-gray-900">
+                    {bankDetails.account_name || bankDetails.account_holder_name || "-"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Account Number</dt>
+                  <dd className="font-medium text-gray-900">
+                    {bankDetails.account_number || "-"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">SWIFT / BIC Code</dt>
+                  <dd className="font-medium text-gray-900">
+                    {bankDetails.swift_code || "-"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">IBAN</dt>
+                  <dd className="font-medium text-gray-900 font-mono tracking-wider">
+                    {bankDetails.iban || "-"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Currency</dt>
+                  <dd className="font-medium text-gray-900">
+                    {bankDetails.currency || "-"}
+                  </dd>
+                </div>
+                <div className="sm:col-span-2">
+                  <dt className="text-gray-500">Bank Address</dt>
+                  <dd className="font-medium text-gray-900">
+                    {bankDetails.bank_address || "-"}
+                  </dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="text-gray-500 italic">No banking details provided.</p>
+            );
+          })()}
+        </div>
+
+        {/* Attestation Box */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mt-8">
+          <div className="flex items-start">
+            <ShieldCheck className="w-6 h-6 text-blue-600 mt-0.5 mr-3 flex-shrink-0" />
+            <div>
+              <h4 className="text-md font-medium text-blue-900 mb-2">Final Attestation</h4>
+              <p className="text-sm text-blue-800 mb-4 leading-relaxed">
+                I hereby declare and confirm that I am authorized to submit this application and bind{" "}
+                <strong>{issuerData.legal_entity_name || "this entity"}</strong> to all applicable agreements.
+                I attest that all information and corporate documents submitted in this application are true,
+                accurate, and complete to the best of my knowledge, and I accept the terms and conditions of Jade Fortune.
+              </p>
+              <label className="flex items-center space-x-3 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={hasAttested}
+                  onChange={(e) => setHasAttested(e.target.checked)}
+                  className="w-5 h-5 text-[#064e3b] border-gray-300 rounded focus:ring-[#064e3b]"
+                />
+                <span className="text-sm font-medium text-blue-900">
+                  I agree to the above terms and attest to the accuracy of my submission.
+                </span>
+              </label>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="pt-8 space-y-6 border-t border-gray-200 mt-8">
-        <div className="space-y-4">
-          <div className="flex items-start">
-            <div className="flex items-center h-5">
-              <input
-                id="consent1"
-                type="checkbox"
-                checked={consent1}
-                onChange={(e) => setConsent1(e.target.checked)}
-                className="w-4 h-4 text-[#064e3b] border-gray-300 rounded focus:ring-[#064e3b]"
-              />
-            </div>
-            <label htmlFor="consent1" className="ml-3 text-sm text-gray-700">
-              I confirm that I am authorized to submit this application and bind{" "}
-              <strong>{issuerData.legal_entity_name || "this entity"}</strong>{" "}
-              to the agreements below and that all information and documents
-              submitted in this application are true, accurate, and complete to
-              the best of my knowledge.
-            </label>
-          </div>
-          <div className="flex items-start">
-            <div className="flex items-center h-5">
-              <input
-                id="consent2"
-                type="checkbox"
-                checked={consent2}
-                onChange={(e) => setConsent2(e.target.checked)}
-                className="w-4 h-4 text-[#064e3b] border-gray-300 rounded focus:ring-[#064e3b]"
-              />
-            </div>
-            <label htmlFor="consent2" className="ml-3 text-sm text-gray-700">
-              I have read and accepted the{" "}
-              <Link href="#" className="text-blue-600 hover:underline">
-                terms and conditions of Jade Fortune
-              </Link>
-              .
-            </label>
-          </div>
-        </div>
-
+      <div className="pt-8 border-t border-gray-200 mt-8">
         <button
           type="button"
-          disabled={isSubmitting || !consent1 || !consent2}
+          disabled={isSubmitting || !hasAttested}
           onClick={async () => {
             setIsSubmitting(true);
             try {

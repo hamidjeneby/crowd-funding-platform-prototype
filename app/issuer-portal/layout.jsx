@@ -1,8 +1,5 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
-import Link from "next/link";
-import { headers } from "next/headers";
 import Sidebar from "./components/Sidebar";
 
 export default async function IssuerPortalLayout({ children }) {

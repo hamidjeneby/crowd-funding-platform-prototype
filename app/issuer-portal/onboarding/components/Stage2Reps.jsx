@@ -69,6 +69,8 @@ function RepForm({ rep, onSaved, onCancel }) {
   const isUbo = watch("is_ubo");
   const isOther = watch("is_other");
 
+  const [error, setError] = useState(null);
+
   const onSubmit = async (formData) => {
     // If no existing file and no new file selected, throw error
     if (!rep?.id_url && !file) {
@@ -77,13 +79,16 @@ function RepForm({ rep, onSaved, onCancel }) {
     }
 
     setIsSaving(true);
+    setError(null);
     try {
       const data = new FormData();
       Object.keys(formData).forEach(key => data.append(key, formData[key]));
       if (file) {
         // Enforce pdf or image
         if (!file.type.match(/^(image\/.*|application\/pdf)$/)) {
-          throw new Error("Only images or PDF files are allowed");
+          setFileError("Only images or PDF files are allowed.");
+          setIsSaving(false);
+          return;
         }
         data.append("file", file);
       }
@@ -95,7 +100,7 @@ function RepForm({ rep, onSaved, onCancel }) {
       onSaved();
     } catch (err) {
       console.error(err);
-      alert(err.message);
+      setError("Failed to save representative. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -103,6 +108,11 @@ function RepForm({ rep, onSaved, onCancel }) {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="bg-gray-50 p-6 rounded-lg border border-gray-200 space-y-6">
+      {error && (
+        <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-md">
+          {error}
+        </div>
+      )}
       <p className="text-sm text-red-500 font-medium">* Indicates a required field</p>
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
         <div className="sm:col-span-2">
@@ -213,6 +223,7 @@ export default function Stage2Reps({ reps, onUpdate, onNext, onBack }) {
   const [editingRep, setEditingRep] = useState(null);
   const [isAdding, setIsAdding] = useState(false);
   const [isRemoving, setIsRemoving] = useState(null);
+  const [error, setError] = useState(null);
 
   const handleRefresh = async () => {
     router.refresh();
@@ -220,12 +231,13 @@ export default function Stage2Reps({ reps, onUpdate, onNext, onBack }) {
 
   const handleRemove = async (id) => {
     setIsRemoving(id);
+    setError(null);
     try {
       await removeStage2Rep(id);
       handleRefresh();
     } catch (err) {
       console.error(err);
-      alert(err.message);
+      setError("Failed to remove representative. Please try again.");
     } finally {
       setIsRemoving(null);
     }
@@ -233,6 +245,11 @@ export default function Stage2Reps({ reps, onUpdate, onNext, onBack }) {
 
   return (
     <div className="space-y-8">
+      {error && (
+        <div className="p-4 rounded-lg bg-red-50 text-red-700 text-sm border border-red-200">
+          {error}
+        </div>
+      )}
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-2">Authorized Representatives</h3>
         <p className="text-sm text-gray-500">Add all authorized signatories, directors, and ultimate beneficial owners (25%+).</p>

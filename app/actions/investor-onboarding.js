@@ -9,7 +9,7 @@ import { encrypt, decrypt } from "@/app/utils/crypto";
 export async function syncOrganizationAndMembership(
   orgId,
   userId,
-  role = "admin",
+  role = null,
   orgType = "investor",
   orgName = null
 ) {
@@ -18,7 +18,7 @@ export async function syncOrganizationAndMembership(
   // 1. Ensure organization exists in organizations table
   const { data: existingOrg } = await supabaseAdmin
     .from("organizations")
-    .select("id")
+    .select("id, created_by")
     .eq("org_id", orgId)
     .maybeSingle();
 
@@ -34,7 +34,7 @@ export async function syncOrganizationAndMembership(
     if (orgErr) console.error("Error creating organization record:", orgErr);
   }
 
-  // 2. Ensure membership exists in memberships table (set role to admin ONLY when first created)
+  // 2. Ensure membership exists in memberships table
   const { data: existingMem } = await supabaseAdmin
     .from("memberships")
     .select("id, role")
@@ -43,15 +43,21 @@ export async function syncOrganizationAndMembership(
     .maybeSingle();
 
   if (!existingMem) {
+    const isCreator = !existingOrg || existingOrg?.created_by === userId;
+    const assignedRole = role || (isCreator ? "admin" : "member");
+
     const { error: memErr } = await supabaseAdmin
       .from("memberships")
-      .insert({
-        org_id: orgId,
-        membership_id: `mem_${orgId}_${userId}`,
-        user_id: userId,
-        role: role || "admin",
-      });
-    if (memErr) console.error("Error creating membership record:", memErr);
+      .upsert(
+        {
+          org_id: orgId,
+          membership_id: `mem_${orgId}_${userId}`,
+          user_id: userId,
+          role: assignedRole,
+        },
+        { onConflict: "membership_id" }
+      );
+    if (memErr) console.error("Error syncing membership record:", memErr);
   }
 }
 
@@ -63,7 +69,7 @@ export async function getOnboardingData() {
 
   // 1. If orgId exists, search investors table by org_id first
   if (orgId) {
-    await syncOrganizationAndMembership(orgId, userId, "admin", "investor");
+    await syncOrganizationAndMembership(orgId, userId, null, "investor");
 
     const { data: instData } = await supabaseAdmin
       .from("investors")
@@ -98,18 +104,15 @@ export async function getOnboardingData() {
     }
   }
 
-  const isInstitutional = investor?.type === "institutional" || !!orgId;
-  const entityId = isInstitutional && orgId ? orgId : userId;
+  const investorPk = investor?.id;
 
-  const { data: reps } = await supabaseAdmin
-    .from("investor_reps")
-    .select("*")
-    .eq("investor_id", entityId);
+  const { data: reps } = investorPk
+    ? await supabaseAdmin.from("investor_reps").select("*").eq("investor_id", investorPk)
+    : { data: [] };
 
-  const { data: docs } = await supabaseAdmin
-    .from("investor_docs")
-    .select("*")
-    .eq("investor_id", entityId);
+  const { data: docs } = investorPk
+    ? await supabaseAdmin.from("investor_docs").select("*").eq("investor_id", investorPk)
+    : { data: [] };
 
   // Decrypt sensitive fields for Institutional
   if (investor?.trade_license_number) {
@@ -145,7 +148,7 @@ export async function setInvestorType(type) {
 
   if (type === "institutional") {
     if (orgId) {
-      await syncOrganizationAndMembership(orgId, userId, "admin", "investor");
+      await syncOrganizationAndMembership(orgId, userId, null, "investor");
 
       const { error } = await supabaseAdmin
         .from("investors")
@@ -158,7 +161,7 @@ export async function setInvestorType(type) {
           { onConflict: "org_id" }
         );
 
-      if (error) throw new Error("Failed to set investor type: " + error.message);
+      if (error) throw new Error("Failed to set investor type.");
     } else {
       const { error } = await supabaseAdmin
         .from("investors")
@@ -171,7 +174,7 @@ export async function setInvestorType(type) {
           { onConflict: "user_id" }
         );
 
-      if (error) throw new Error("Failed to set investor type: " + error.message);
+      if (error) throw new Error("Failed to set investor type.");
     }
   } else {
     const { error } = await supabaseAdmin
@@ -185,7 +188,7 @@ export async function setInvestorType(type) {
         { onConflict: "user_id" }
       );
 
-    if (error) throw new Error("Failed to set investor type: " + error.message);
+    if (error) throw new Error("Failed to set investor type.");
   }
 
   revalidatePath("/investor-portal/onboarding");
@@ -224,7 +227,7 @@ export async function updateCurrentStep(step) {
       .update({ current_step: highestStep })
       .match(targetEq);
 
-    if (error) throw new Error("Failed to update current step: " + error.message);
+    if (error) throw new Error("Failed to update current step.");
   }
 
   return { success: true, current_step: highestStep };
@@ -234,7 +237,7 @@ export async function saveStage1Institutional(data) {
   const { userId, orgId } = await auth();
   if (!userId || !orgId) throw new Error("Organization context required for Institutional Investors");
 
-  await syncOrganizationAndMembership(orgId, userId, "admin", "investor");
+  await syncOrganizationAndMembership(orgId, userId, null, "investor");
 
   const payload = {
     type: "institutional",
@@ -258,7 +261,7 @@ export async function saveStage1Institutional(data) {
     .from("investors")
     .upsert(payload, { onConflict: "org_id" });
 
-  if (error) throw new Error("Failed to save entity details: " + error.message);
+  if (error) throw new Error("Failed to save entity details.");
   revalidatePath("/investor-portal/onboarding");
   return { success: true };
 }
@@ -289,7 +292,7 @@ export async function saveStage1Individual(data) {
     .from("investors")
     .upsert(payload, { onConflict: "user_id" });
 
-  if (error) throw new Error("Failed to save personal info: " + error.message);
+  if (error) throw new Error("Failed to save personal info.");
   revalidatePath("/investor-portal/onboarding");
   return { success: true };
 }
@@ -302,7 +305,7 @@ export async function saveStage2Rep(formData) {
   if (orgId) {
     const { data } = await supabaseAdmin
       .from("investors")
-      .select("type, org_id")
+      .select("id, type, org_id")
       .eq("org_id", orgId)
       .maybeSingle();
     investor = data;
@@ -310,14 +313,18 @@ export async function saveStage2Rep(formData) {
   if (!investor) {
     const { data } = await supabaseAdmin
       .from("investors")
-      .select("type, org_id, user_id")
+      .select("id, type, org_id, user_id")
       .eq("user_id", userId)
       .maybeSingle();
     investor = data;
   }
 
+  if (!investor) {
+    throw new Error("Investor profile record not found.");
+  }
+
   const isInstitutional = investor?.type === "institutional" || !!orgId;
-  const entityId = isInstitutional && orgId ? orgId : userId;
+  const folderId = isInstitutional && orgId ? orgId : userId;
 
   const repId = formData.get("repId");
   const file = formData.get("file");
@@ -329,14 +336,14 @@ export async function saveStage2Rep(formData) {
     const fileName = `${Date.now()}_${fullName}.${fileExt}`;
     
     // STORAGE PATH: investor_reps/{org_id}/{filename} for institutional, investor_reps/{user_id}/{filename} for individual
-    const filePath = `${entityId}/${fileName}`;
+    const filePath = `${folderId}/${fileName}`;
 
     const { error: uploadError } = await supabaseAdmin.storage
       .from("investor_reps")
       .upload(filePath, file, { upsert: true });
 
     if (uploadError)
-      throw new Error("Failed to upload representative ID: " + uploadError.message);
+      throw new Error("Failed to upload representative ID document.");
 
     const {
       data: { publicUrl },
@@ -345,7 +352,7 @@ export async function saveStage2Rep(formData) {
   }
 
   const payload = {
-    investor_id: entityId,
+    investor_id: investor.id, // INTEGER PK!
     full_name: formData.get("full_name"),
     id_type: formData.get("id_type"),
     id_number: encrypt(formData.get("id_number")),
@@ -369,7 +376,7 @@ export async function saveStage2Rep(formData) {
       .from("investor_reps")
       .update(payload)
       .eq("id", repId)
-      .eq("investor_id", entityId);
+      .eq("investor_id", investor.id);
     error = err;
   } else {
     const { error: err } = await supabaseAdmin
@@ -378,7 +385,7 @@ export async function saveStage2Rep(formData) {
     error = err;
   }
 
-  if (error) throw new Error("Failed to save representative: " + error.message);
+  if (error) throw new Error("Failed to save representative.");
   revalidatePath("/investor-portal/onboarding");
   return { success: true };
 }
@@ -391,7 +398,7 @@ export async function removeStage2Rep(repId) {
   if (orgId) {
     const { data } = await supabaseAdmin
       .from("investors")
-      .select("type, org_id")
+      .select("id, type, org_id")
       .eq("org_id", orgId)
       .maybeSingle();
     investor = data;
@@ -399,39 +406,41 @@ export async function removeStage2Rep(repId) {
   if (!investor) {
     const { data } = await supabaseAdmin
       .from("investors")
-      .select("type, org_id, user_id")
+      .select("id, type, org_id, user_id")
       .eq("user_id", userId)
       .maybeSingle();
     investor = data;
   }
 
+  if (!investor) throw new Error("Investor profile record not found.");
+
   const isInstitutional = investor?.type === "institutional" || !!orgId;
-  const entityId = isInstitutional && orgId ? orgId : userId;
+  const folderId = isInstitutional && orgId ? orgId : userId;
 
   const { data, error: fetchErr } = await supabaseAdmin
     .from("investor_reps")
     .select("id_url")
     .eq("id", repId)
-    .eq("investor_id", entityId)
+    .eq("investor_id", investor.id)
     .single();
 
-  if (fetchErr) throw new Error("Representative not found");
+  if (fetchErr) throw new Error("Representative not found.");
 
   if (data?.id_url) {
     const path = data.id_url.split("/").pop();
     await supabaseAdmin.storage
       .from("investor_reps")
-      .remove([`${entityId}/${path}`]);
+      .remove([`${folderId}/${path}`]);
   }
 
   const { error } = await supabaseAdmin
     .from("investor_reps")
     .delete()
     .eq("id", repId)
-    .eq("investor_id", entityId);
+    .eq("investor_id", investor.id);
 
   if (error)
-    throw new Error("Failed to delete representative: " + error.message);
+    throw new Error("Failed to delete representative.");
   revalidatePath("/investor-portal/onboarding");
   return { success: true };
 }
@@ -444,7 +453,7 @@ export async function saveStage3Doc(formData) {
   if (orgId) {
     const { data } = await supabaseAdmin
       .from("investors")
-      .select("type, org_id")
+      .select("id, type, org_id")
       .eq("org_id", orgId)
       .maybeSingle();
     investor = data;
@@ -452,35 +461,37 @@ export async function saveStage3Doc(formData) {
   if (!investor) {
     const { data } = await supabaseAdmin
       .from("investors")
-      .select("type, org_id, user_id")
+      .select("id, type, org_id, user_id")
       .eq("user_id", userId)
       .maybeSingle();
     investor = data;
   }
 
+  if (!investor) throw new Error("Investor profile record not found.");
+
   const isInstitutional = investor?.type === "institutional" || !!orgId;
-  const entityId = isInstitutional && orgId ? orgId : userId;
+  const folderId = isInstitutional && orgId ? orgId : userId;
 
   const docType = formData.get("doc_type");
   const password = formData.get("document_password");
   const file = formData.get("file");
 
   if (!docType || !file || file.size === 0) {
-    throw new Error("Document type and file are required");
+    throw new Error("Document type and file are required.");
   }
 
   const fileExt = file.name.split(".").pop();
   const fileName = `${docType}_${Date.now()}.${fileExt}`;
   
   // STORAGE PATH: investor_docs/{org_id}/{filename} for institutional, investor_docs/{user_id}/{filename} for individual
-  const filePath = `${entityId}/${fileName}`;
+  const filePath = `${folderId}/${fileName}`;
 
   const { error: uploadError } = await supabaseAdmin.storage
     .from("investor_docs")
     .upload(filePath, file, { upsert: true });
 
   if (uploadError)
-    throw new Error("Failed to upload document: " + uploadError.message);
+    throw new Error("Failed to upload document.");
 
   const {
     data: { publicUrl },
@@ -490,7 +501,7 @@ export async function saveStage3Doc(formData) {
   const { data: existing } = await supabaseAdmin
     .from("investor_docs")
     .select("id, url")
-    .eq("investor_id", entityId)
+    .eq("investor_id", investor.id)
     .eq("doc_type", docType)
     .maybeSingle();
 
@@ -499,7 +510,7 @@ export async function saveStage3Doc(formData) {
       const oldPath = existing.url.split("/").pop();
       await supabaseAdmin.storage
         .from("investor_docs")
-        .remove([`${entityId}/${oldPath}`]);
+        .remove([`${folderId}/${oldPath}`]);
     }
 
     const { error } = await supabaseAdmin
@@ -510,11 +521,11 @@ export async function saveStage3Doc(formData) {
         uploaded_at: new Date().toISOString(),
       })
       .eq("id", existing.id);
-    if (error) throw new Error("Failed to update document: " + error.message);
+    if (error) throw new Error("Failed to update document.");
   } else {
     const { error } = await supabaseAdmin.from("investor_docs").insert([
       {
-        investor_id: entityId,
+        investor_id: investor.id, // INTEGER PK!
         doc_type: docType,
         document_password: password ? encrypt(password) : null,
         url: fileUrl,
@@ -522,7 +533,7 @@ export async function saveStage3Doc(formData) {
         uploaded_at: new Date().toISOString(),
       },
     ]);
-    if (error) throw new Error("Failed to insert document: " + error.message);
+    if (error) throw new Error("Failed to insert document.");
   }
 
   if (docType === "trade_certificate") {
@@ -545,7 +556,7 @@ export async function updateDocPassword(docType, password) {
   if (orgId) {
     const { data } = await supabaseAdmin
       .from("investors")
-      .select("type, org_id")
+      .select("id, type, org_id")
       .eq("org_id", orgId)
       .maybeSingle();
     investor = data;
@@ -553,22 +564,21 @@ export async function updateDocPassword(docType, password) {
   if (!investor) {
     const { data } = await supabaseAdmin
       .from("investors")
-      .select("type, org_id, user_id")
+      .select("id, type, org_id, user_id")
       .eq("user_id", userId)
       .maybeSingle();
     investor = data;
   }
 
-  const isInstitutional = investor?.type === "institutional" || !!orgId;
-  const entityId = isInstitutional && orgId ? orgId : userId;
+  if (!investor) throw new Error("Investor record not found.");
 
   const { error } = await supabaseAdmin
     .from("investor_docs")
     .update({ document_password: password ? encrypt(password) : null })
-    .eq("investor_id", entityId)
+    .eq("investor_id", investor.id)
     .eq("doc_type", docType);
 
-  if (error) throw new Error("Failed to update document password: " + error.message);
+  if (error) throw new Error("Failed to update document password.");
 
   revalidatePath("/investor-portal/onboarding");
   return { success: true };
@@ -607,7 +617,7 @@ export async function saveStage4Banking(bankDetails) {
     })
     .match(targetEq);
 
-  if (error) throw new Error("Failed to save bank details: " + error.message);
+  if (error) throw new Error("Failed to save bank details.");
   revalidatePath("/investor-portal/onboarding");
   return { success: true };
 }
@@ -651,7 +661,7 @@ export async function submitApplication() {
     })
     .match(targetEq);
 
-  if (error) throw new Error("Failed to submit application: " + error.message);
+  if (error) throw new Error("Failed to submit application.");
   revalidatePath("/investor-portal/onboarding");
   return { success: true };
 }

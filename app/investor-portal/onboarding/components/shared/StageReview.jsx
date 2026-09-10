@@ -6,6 +6,7 @@ import { CheckCircle2, Edit2, Loader2, AlertTriangle, ShieldCheck } from "lucide
 export default function StageReview({ investorData, repsData, docsData, type, onEditSection, onSubmit }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasAttested, setHasAttested] = useState(false);
+  const [error, setError] = useState(null);
   const isInstitutional = type === "institutional";
 
   const bankDetails = investorData.bank_details ? 
@@ -13,8 +14,9 @@ export default function StageReview({ investorData, repsData, docsData, type, on
     : null;
 
   const handleSubmit = async () => {
+    setError(null);
     if (!hasAttested) {
-      alert("Please confirm the attestation before submitting.");
+      setError("Please confirm the attestation before submitting.");
       return;
     }
     setIsSubmitting(true);
@@ -24,6 +26,11 @@ export default function StageReview({ investorData, repsData, docsData, type, on
 
   return (
     <div className="space-y-8">
+      {error && (
+        <div className="p-4 rounded-lg bg-red-50 text-red-700 text-sm border border-red-200">
+          {error}
+        </div>
+      )}
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-2">Review & Attest</h3>
         <p className="text-sm text-gray-500">Please review your information before final submission.</p>

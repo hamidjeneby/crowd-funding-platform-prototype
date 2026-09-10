@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import ProgressBar from "@/app/issuer-portal/onboarding/components/ProgressBar";
 import { useRouter } from "next/navigation";
+import { useClerk } from "@clerk/nextjs";
+import { Users, UserPlus } from "lucide-react";
 import { submitApplication, updateCurrentStep } from "@/app/actions/investor-onboarding";
 
 // We will import these once we create them
@@ -33,6 +35,7 @@ const INDIVIDUAL_STEPS = [
 
 export default function OnboardingFlow({ initialData, type }) {
   const router = useRouter();
+  const clerk = useClerk();
   const isInstitutional = type === "institutional";
   const STEPS = isInstitutional ? INSTITUTIONAL_STEPS : INDIVIDUAL_STEPS;
   const maxSteps = STEPS.length;
@@ -47,6 +50,7 @@ export default function OnboardingFlow({ initialData, type }) {
   const [investorData, setInvestorData] = useState(initialData.investor || {});
   const [repsData, setRepsData] = useState(initialData.reps || []);
   const [docsData, setDocsData] = useState(initialData.docs || []);
+  const [submitError, setSubmitError] = useState(null);
 
   // Sync state when initialData changes due to router.refresh() from a DB save
   useEffect(() => {
@@ -113,7 +117,40 @@ export default function OnboardingFlow({ initialData, type }) {
 
   return (
     <div className="bg-white rounded-xl shadow-lg border border-[#064e3b]/10 p-6 sm:p-10">
+      {/* Organization Team Collaboration Banner (Only for Institutional Investors) */}
+      {isInstitutional && (
+        <div className="mb-8 p-4 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-[#064e3b] text-white shadow-xs">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-[#064e3b]">
+                Collaborate on Onboarding
+              </h4>
+              <p className="text-xs text-gray-600">
+                Invite team members or representatives to help complete entity details & document uploads.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => clerk.openOrganizationProfile()}
+            className="inline-flex items-center justify-center px-4 py-2 bg-[#064e3b] hover:bg-[#064e3b]/90 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex-shrink-0 cursor-pointer"
+          >
+            <UserPlus className="w-4 h-4 mr-2" />
+            Manage & Invite Team
+          </button>
+        </div>
+      )}
+
       <ProgressBar currentStep={currentStep} steps={STEPS} completedSteps={completedSteps} />
+
+      {submitError && (
+        <div className="mt-6 p-4 text-sm text-red-700 bg-red-50 rounded-xl border border-red-200 text-center">
+          {submitError}
+        </div>
+      )}
       
       <div className="mt-8">
         {isInstitutional ? (
@@ -137,11 +174,13 @@ export default function OnboardingFlow({ initialData, type }) {
                 onEditSection={handleEditSection}
                 onSubmit={async () => {
                   try {
+                    setSubmitError(null);
                     await submitApplication();
+                    window.scrollTo({ top: 0, behavior: "smooth" });
                     router.refresh();
                   } catch (err) {
                     console.error(err);
-                    alert(err.message);
+                    setSubmitError("An error occurred while submitting your application. Please try again.");
                   }
                 }}
               />
@@ -165,11 +204,13 @@ export default function OnboardingFlow({ initialData, type }) {
                 onEditSection={handleEditSection}
                 onSubmit={async () => {
                   try {
+                    setSubmitError(null);
                     await submitApplication();
+                    window.scrollTo({ top: 0, behavior: "smooth" });
                     router.refresh();
                   } catch (err) {
                     console.error(err);
-                    alert(err.message);
+                    setSubmitError("An error occurred while submitting your application. Please try again.");
                   }
                 }}
               />

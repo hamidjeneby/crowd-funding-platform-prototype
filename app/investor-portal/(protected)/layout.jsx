@@ -1,24 +1,38 @@
-import { currentUser } from "@clerk/nextjs/server";
-import { createClient } from "@supabase/supabase-js";
+import { auth } from "@clerk/nextjs/server";
+import { supabaseAdmin } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 
 export default async function ProtectedInvestorLayout({ children }) {
-  const user = await currentUser();
+  const { userId, orgId } = await auth();
 
-  if (!user) return null;
+  if (!userId) {
+    redirect("/investor/sign-in");
+  }
 
-  const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY,
-  );
+  let investor = null;
 
-  const { data } = await supabaseAdmin
-    .from("investors")
-    .select("onboarding_status")
-    .eq("user_id", user.id)
-    .single();
+  if (orgId) {
+    // 1. Operating in Organization Context (Institutional Investor)
+    const { data: instData } = await supabaseAdmin
+      .from("investors")
+      .select("onboarding_status")
+      .eq("org_id", orgId)
+      .maybeSingle();
 
-  const isFullyOnboarded = data?.onboarding_status && data.onboarding_status !== "incomplete";
+    investor = instData;
+  } else {
+    // 2. Operating in Personal Context (Individual Investor)
+    const { data: indData } = await supabaseAdmin
+      .from("investors")
+      .select("onboarding_status")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    investor = indData;
+  }
+
+  const isFullyOnboarded =
+    investor?.onboarding_status && investor.onboarding_status !== "incomplete";
 
   if (!isFullyOnboarded) {
     redirect("/investor-portal/onboarding");

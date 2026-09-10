@@ -1,5 +1,5 @@
 import { Webhook } from "svix";
-import { WebhookEvent } from "@clerk/nextjs/server";
+import { WebhookEvent, clerkClient } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 
 export async function POST(req: Request) {
@@ -84,10 +84,6 @@ export async function POST(req: Request) {
         await supabaseAdmin
           .from("investors")
           .upsert([{ user_id: id }], { onConflict: "user_id" });
-      } else if (role === "issuer") {
-        await supabaseAdmin
-          .from("issuers")
-          .upsert([{ user_id: id }], { onConflict: "user_id" });
       }
     }
 
@@ -140,11 +136,24 @@ export async function POST(req: Request) {
     if (eventType === "organization.created") {
       const { id, name, created_by } = evt.data;
 
+      let orgType = "investor";
+      if (created_by) {
+        const { data: creator } = await supabaseAdmin
+          .from("users")
+          .select("role")
+          .eq("user_id", created_by)
+          .maybeSingle();
+
+        if (creator?.role === "issuer") {
+          orgType = "issuer";
+        }
+      }
+
       const orgData = {
         org_id: id,
         org_name: name || id,
         created_by: created_by || null,
-        type: "investor",
+        type: orgType,
       };
 
       const { error } = await supabaseAdmin
@@ -154,6 +163,21 @@ export async function POST(req: Request) {
       if (error) {
         console.error("Error syncing organization.created:", error);
         throw error;
+      }
+
+      if (orgType === "issuer") {
+        const { data: existingIssuer } = await supabaseAdmin
+          .from("issuers")
+          .select("id")
+          .eq("org_id", id)
+          .maybeSingle();
+
+        if (!existingIssuer) {
+          await supabaseAdmin.from("issuers").insert({
+            org_id: id,
+            onboarding_status: "incomplete",
+          });
+        }
       }
     }
 
@@ -181,28 +205,71 @@ export async function POST(req: Request) {
       const user_id = public_user_data?.user_id;
 
       if (org_id && user_id) {
-        // Check if membership already exists to only set role to admin when first being created
-        const { data: existing } = await supabaseAdmin
-          .from("memberships")
-          .select("id, role")
-          .eq("org_id", org_id)
-          .eq("user_id", user_id)
-          .maybeSingle();
+        // Format Clerk role string (e.g. "org:admin" -> "admin", "org:member" -> "member")
+        let cleanRole = "member";
+        if (role) {
+          if (role.includes("admin")) {
+            cleanRole = "admin";
+          } else {
+            cleanRole = role.replace(/^org:/, "") || "member";
+          }
+        } else {
+          // Check if user is the creator of the organization
+          const { data: orgData } = await supabaseAdmin
+            .from("organizations")
+            .select("created_by")
+            .eq("org_id", org_id)
+            .maybeSingle();
+
+          if (orgData?.created_by === user_id) {
+            cleanRole = "admin";
+          }
+        }
 
         const membershipData = {
           org_id,
           membership_id: mem_id || `mem_${org_id}_${user_id}`,
           user_id,
-          role: existing ? (role || existing.role) : "admin",
+          role: cleanRole,
         };
 
         const { error } = await supabaseAdmin
           .from("memberships")
-          .upsert([membershipData], { onConflict: "org_id,user_id" });
+          .upsert([membershipData], { onConflict: "membership_id" });
 
         if (error) {
           console.error(`Error syncing ${eventType}:`, error);
           throw error;
+        }
+
+        // Check if organization is an issuer org, and sync user role to "issuer"
+        const { data: orgRecord } = await supabaseAdmin
+          .from("organizations")
+          .select("type")
+          .eq("org_id", org_id)
+          .maybeSingle();
+
+        const { data: issuerRecord } = await supabaseAdmin
+          .from("issuers")
+          .select("id")
+          .eq("org_id", org_id)
+          .maybeSingle();
+
+        if (orgRecord?.type === "issuer" || issuerRecord) {
+          await supabaseAdmin
+            .from("users")
+            .update({ role: "issuer" })
+            .eq("user_id", user_id);
+
+          try {
+            const client = await clerkClient();
+            await client.users.updateUserMetadata(user_id, {
+              publicMetadata: { role: "issuer" },
+              unsafeMetadata: { role: "issuer" },
+            });
+          } catch (metadataErr) {
+            console.error("Error updating user metadata in webhook:", metadataErr);
+          }
         }
       }
     }

@@ -24,6 +24,7 @@ export default function Stage2DocsIndiv({ docs, onUpdate, onNext, onBack }) {
   const [showPasswords, setShowPasswords] = useState({});
   const [isSaving, setIsSaving] = useState(false);
   const [activeTooltip, setActiveTooltip] = useState(null);
+  const [docError, setDocError] = useState(null);
   
   const fileRefs = {
     identification: useRef(),
@@ -34,9 +35,10 @@ export default function Stage2DocsIndiv({ docs, onUpdate, onNext, onBack }) {
   const isUploaded = (docId) => docs.some(d => d.doc_type === docId);
 
   const handleFileChange = (docId, file) => {
+    setDocError(null);
     if (file) {
       if (!file.type.match(/^(image\/.*|application\/pdf)$/)) {
-        alert("Only images or PDF files are allowed");
+        setDocError("Only image or PDF files are allowed.");
         return;
       }
       setFiles(prev => ({ ...prev, [docId]: file }));
@@ -44,10 +46,11 @@ export default function Stage2DocsIndiv({ docs, onUpdate, onNext, onBack }) {
   };
 
   const handleSaveAndContinue = async () => {
+    setDocError(null);
     const missing = REQUIRED_DOCS.filter(d => !files[d.id] && !isUploaded(d.id));
     
     if (missing.length > 0) {
-      alert(`Please upload all required documents. Missing: ${missing.map(m => m.label).join(", ")}`);
+      setDocError(`Please upload all required documents. Missing: ${missing.map(m => m.label).join(", ")}`);
       return;
     }
 
@@ -81,7 +84,7 @@ export default function Stage2DocsIndiv({ docs, onUpdate, onNext, onBack }) {
       onNext();
     } catch (err) {
       console.error(err);
-      alert(err.message);
+      setDocError("An error occurred while saving your documents. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -93,6 +96,12 @@ export default function Stage2DocsIndiv({ docs, onUpdate, onNext, onBack }) {
         <h3 className="text-lg font-medium text-gray-900 mb-2">Document Upload</h3>
         <p className="text-sm text-gray-500">Please upload the required personal documents. Only PDF and Image files are accepted.</p>
       </div>
+
+      {docError && (
+        <div className="p-4 text-sm text-red-700 bg-red-50 rounded-xl border border-red-200">
+          {docError}
+        </div>
+      )}
 
       <div className="space-y-6">
         <p className="text-sm text-red-500 font-medium">* Indicates a required field</p>

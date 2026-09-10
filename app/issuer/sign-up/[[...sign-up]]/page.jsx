@@ -12,7 +12,7 @@ export default function IssuerSignUpPage() {
   useEffect(() => {
     if (isLoaded && isSignedIn && user) {
       const timeoutId = setTimeout(() => {
-        router.push("/issuer-portal/onboarding");
+        router.push("/issuer-portal");
       }, 3000);
       return () => clearTimeout(timeoutId);
     }

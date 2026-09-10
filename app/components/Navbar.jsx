@@ -2,8 +2,9 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { useAuth, UserButton, useUser } from "@clerk/nextjs";
+import { useAuth, useUser } from "@clerk/nextjs";
 import { usePathname } from "next/navigation";
+import { LayoutDashboard } from "lucide-react";
 
 export default function Navbar() {
   const [activeDropdown, setActiveDropdown] = useState(null);
@@ -174,10 +175,14 @@ export default function Navbar() {
               )}
 
               {isSignedIn && (
-                <div className="flex items-center gap-4">
-                  {role === "investor" && <Link href="/investor-portal" className="text-sm font-medium text-[#064e3b] hover:underline">Investor Portal</Link>}
-                  {role === "issuer" && <Link href="/issuer-portal" className="text-sm font-medium text-[#064e3b] hover:underline">Issuer Portal</Link>}
-                  <UserButton afterSignOutUrl="/" />
+                <div className="flex items-center">
+                  <Link
+                    href={role === "issuer" ? "/issuer-portal" : "/investor-portal"}
+                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-[#fdfbf7] bg-gradient-to-r from-[#059669] to-[#064e3b] rounded-lg shadow-sm hover:brightness-110 active:translate-y-[1px] transition-all"
+                  >
+                    <LayoutDashboard className="w-4 h-4" />
+                    Dashboard
+                  </Link>
                 </div>
               )}
             </div>
@@ -218,9 +223,14 @@ export default function Navbar() {
                 
                 {isSignedIn && (
                   <div className="border-t border-[#064e3b]/10 pt-3 flex flex-col space-y-2 px-3 pb-2">
-                    {role === "investor" && <Link href="/investor-portal" className="text-sm font-medium text-[#064e3b]">Investor Portal</Link>}
-                    {role === "issuer" && <Link href="/issuer-portal" className="text-sm font-medium text-[#064e3b]">Issuer Portal</Link>}
-                    <div className="pt-2"><UserButton afterSignOutUrl="/" /></div>
+                    <Link
+                      href={role === "issuer" ? "/issuer-portal" : "/investor-portal"}
+                      className="flex items-center justify-center gap-2 text-center text-sm bg-gradient-to-b from-[#059669] to-[#064e3b] border-b-[3px] border-[#033527] py-2.5 rounded-lg font-medium text-[#fdfbf7] active:translate-y-[1px] active:border-b-[1.5px] transition-all duration-100"
+                      onClick={() => setActiveDropdown(null)}
+                    >
+                      <LayoutDashboard className="w-4 h-4" />
+                      Dashboard
+                    </Link>
                   </div>
                 )}
               </div>

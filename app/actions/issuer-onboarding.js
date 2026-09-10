@@ -9,15 +9,16 @@ import { encrypt, decrypt } from "@/app/utils/crypto";
 export async function syncOrganizationAndMembership(
   orgId,
   userId,
-  role = "admin",
+  role = null,
   orgType = "issuer",
   orgName = null
 ) {
   if (!orgId || !userId) return;
 
+  // 1. Create/Update organization record with correct type ("issuer" or "investor")
   const { data: existingOrg } = await supabaseAdmin
     .from("organizations")
-    .select("id")
+    .select("id, type, created_by")
     .eq("org_id", orgId)
     .maybeSingle();
 
@@ -31,8 +32,14 @@ export async function syncOrganizationAndMembership(
         type: orgType,
       });
     if (orgErr) console.error("Error creating organization record:", orgErr);
+  } else if (existingOrg.type !== orgType) {
+    await supabaseAdmin
+      .from("organizations")
+      .update({ type: orgType, ...(orgName ? { org_name: orgName } : {}) })
+      .eq("org_id", orgId);
   }
 
+  // 2. Ensure membership exists in memberships table
   const { data: existingMem } = await supabaseAdmin
     .from("memberships")
     .select("id, role")
@@ -41,15 +48,41 @@ export async function syncOrganizationAndMembership(
     .maybeSingle();
 
   if (!existingMem) {
+    const isCreator = !existingOrg || existingOrg?.created_by === userId;
+    const assignedRole = role || (isCreator ? "admin" : "member");
+
     const { error: memErr } = await supabaseAdmin
       .from("memberships")
-      .insert({
-        org_id: orgId,
-        membership_id: `mem_${orgId}_${userId}`,
-        user_id: userId,
-        role: role || "admin",
-      });
-    if (memErr) console.error("Error creating membership record:", memErr);
+      .upsert(
+        {
+          org_id: orgId,
+          membership_id: `mem_${orgId}_${userId}`,
+          user_id: userId,
+          role: assignedRole,
+        },
+        { onConflict: "membership_id" }
+      );
+    if (memErr) console.error("Error syncing membership record:", memErr);
+  }
+
+  // 3. If issuer, ensure a row exists in issuers table linked to org_id
+  if (orgType === "issuer") {
+    const { data: existingIssuer } = await supabaseAdmin
+      .from("issuers")
+      .select("id, org_id")
+      .eq("org_id", orgId)
+      .maybeSingle();
+
+    if (!existingIssuer) {
+      const { error: issuerErr } = await supabaseAdmin
+        .from("issuers")
+        .insert({
+          org_id: orgId,
+          onboarding_status: "incomplete",
+          current_step: 1,
+        });
+      if (issuerErr) console.error("Error creating initial issuer record:", issuerErr);
+    }
   }
 }
 
@@ -58,43 +91,28 @@ export async function getOnboardingData() {
   if (!userId) throw new Error("Unauthorized");
   if (!orgId) return { issuer: {}, reps: [], docs: [], needsOrg: true };
 
-  await syncOrganizationAndMembership(orgId, userId, "admin", "issuer");
+  await syncOrganizationAndMembership(orgId, userId, null, "issuer");
 
-  // Fetch issuer record by org_id or user_id fallback
+  // Fetch issuer record by org_id
   let { data: issuer, error: issuerError } = await supabaseAdmin
     .from("issuers")
     .select("*")
     .eq("org_id", orgId)
     .maybeSingle();
 
-  if (!issuer) {
-    // Fallback search by primary_contact_user_id or user_id
-    const { data: legacyIssuer } = await supabaseAdmin
-      .from("issuers")
-      .select("*")
-      .or(`user_id.eq.${userId},primary_contact_user_id.eq.${userId}`)
-      .maybeSingle();
+  const issuerPk = issuer?.id;
 
-    if (legacyIssuer) {
-      issuer = legacyIssuer;
-    }
-  }
-
-  const issuerKey = orgId;
-
-  const { data: reps, error: repsError } = await supabaseAdmin
-    .from("issuer_reps")
-    .select("*")
-    .eq("issuer_id", issuerKey);
+  const { data: reps, error: repsError } = issuerPk
+    ? await supabaseAdmin.from("issuer_reps").select("*").eq("issuer_id", issuerPk)
+    : { data: [] };
 
   if (repsError) {
     console.error("Reps fetch error:", repsError);
   }
 
-  const { data: docs, error: docsError } = await supabaseAdmin
-    .from("issuer_docs")
-    .select("*")
-    .eq("issuer_id", issuerKey);
+  const { data: docs, error: docsError } = issuerPk
+    ? await supabaseAdmin.from("issuer_docs").select("*").eq("issuer_id", issuerPk)
+    : { data: [] };
 
   if (docsError) {
     console.error("Docs fetch error:", docsError);
@@ -130,15 +148,15 @@ export async function saveStage1(data) {
   await syncOrganizationAndMembership(
     orgId,
     userId,
-    "admin",
+    null,
     "issuer",
     data.legal_entity_name
   );
 
-  const payload = {
+  const encryptedLicense = encrypt(data.trade_license_number);
+
+  const basePayload = {
     org_id: orgId,
-    user_id: userId,
-    primary_contact_user_id: userId,
     legal_entity_name: data.legal_entity_name,
     country: data.country,
     city: data.city,
@@ -146,24 +164,34 @@ export async function saveStage1(data) {
     business_phone_number: data.business_phone_number,
     business_type: data.business_type,
     license_authority: data.license_authority,
-    trade_license_number: encrypt(data.trade_license_number),
-    updated_at: new Date().toISOString(),
+    trade_license_number: encryptedLicense,
   };
 
-  // Upsert into issuers table using org_id
-  const { error } = await supabaseAdmin
+  // Check if an issuer record already exists for this org_id
+  let { data: existing } = await supabaseAdmin
     .from("issuers")
-    .upsert(payload, { onConflict: "org_id" });
+    .select("id")
+    .eq("org_id", orgId)
+    .maybeSingle();
 
-  if (error) {
-    // If org_id column is missing or constrained differently, update by org_id or user_id
+  if (existing) {
     const { error: updateErr } = await supabaseAdmin
       .from("issuers")
-      .update(payload)
-      .eq("org_id", orgId);
+      .update(basePayload)
+      .eq("id", existing.id);
 
     if (updateErr) {
-      throw new Error("Failed to save entity details: " + error.message);
+      console.error("saveStage1 update error:", updateErr);
+      throw new Error("Failed to save entity details.");
+    }
+  } else {
+    const { error: insertErr } = await supabaseAdmin
+      .from("issuers")
+      .insert({ ...basePayload, onboarding_status: "incomplete" });
+
+    if (insertErr) {
+      console.error("saveStage1 insert error:", insertErr);
+      throw new Error("Failed to save entity details.");
     }
   }
 
@@ -174,6 +202,22 @@ export async function saveStage1(data) {
 export async function saveStage2Rep(formData) {
   const { userId, orgId } = await auth();
   if (!userId || !orgId) throw new Error("Organization context required");
+
+  let { data: issuer } = await supabaseAdmin
+    .from("issuers")
+    .select("id")
+    .eq("org_id", orgId)
+    .maybeSingle();
+
+  if (!issuer) {
+    const { data: newIssuer, error: insertErr } = await supabaseAdmin
+      .from("issuers")
+      .insert({ org_id: orgId, onboarding_status: "incomplete" })
+      .select("id")
+      .single();
+    if (insertErr) throw new Error("Failed to initialize issuer record.");
+    issuer = newIssuer;
+  }
 
   const repId = formData.get("repId");
   const file = formData.get("file");
@@ -192,7 +236,7 @@ export async function saveStage2Rep(formData) {
       .upload(filePath, file, { upsert: true });
 
     if (uploadError)
-      throw new Error("Failed to upload representative ID document: " + uploadError.message);
+      throw new Error("Failed to upload representative ID document.");
 
     const {
       data: { publicUrl },
@@ -201,7 +245,7 @@ export async function saveStage2Rep(formData) {
   }
 
   const payload = {
-    issuer_id: orgId,
+    issuer_id: issuer.id,
     full_name: formData.get("full_name"),
     id_type: formData.get("id_type"),
     id_number: encrypt(formData.get("id_number")),
@@ -225,7 +269,7 @@ export async function saveStage2Rep(formData) {
       .from("issuer_reps")
       .update(payload)
       .eq("id", repId)
-      .eq("issuer_id", orgId);
+      .eq("issuer_id", issuer.id);
     error = err;
   } else {
     const { error: err } = await supabaseAdmin
@@ -234,7 +278,7 @@ export async function saveStage2Rep(formData) {
     error = err;
   }
 
-  if (error) throw new Error("Failed to save representative: " + error.message);
+  if (error) throw new Error("Failed to save representative.");
   revalidatePath("/issuer-portal/onboarding");
   return { success: true };
 }
@@ -243,14 +287,22 @@ export async function removeStage2Rep(repId) {
   const { userId, orgId } = await auth();
   if (!userId || !orgId) throw new Error("Organization context required");
 
+  const { data: issuer } = await supabaseAdmin
+    .from("issuers")
+    .select("id")
+    .eq("org_id", orgId)
+    .maybeSingle();
+
+  if (!issuer) throw new Error("Issuer profile not found.");
+
   const { data, error: fetchErr } = await supabaseAdmin
     .from("issuer_reps")
     .select("id_url")
     .eq("id", repId)
-    .eq("issuer_id", orgId)
+    .eq("issuer_id", issuer.id)
     .single();
 
-  if (fetchErr) throw new Error("Representative not found");
+  if (fetchErr) throw new Error("Representative not found.");
 
   if (data?.id_url) {
     const path = data.id_url.split("/").pop();
@@ -263,10 +315,10 @@ export async function removeStage2Rep(repId) {
     .from("issuer_reps")
     .delete()
     .eq("id", repId)
-    .eq("issuer_id", orgId);
+    .eq("issuer_id", issuer.id);
 
   if (error)
-    throw new Error("Failed to delete representative: " + error.message);
+    throw new Error("Failed to delete representative.");
   revalidatePath("/issuer-portal/onboarding");
   return { success: true };
 }
@@ -275,12 +327,28 @@ export async function saveStage3Doc(formData) {
   const { userId, orgId } = await auth();
   if (!userId || !orgId) throw new Error("Organization context required");
 
+  let { data: issuer } = await supabaseAdmin
+    .from("issuers")
+    .select("id")
+    .eq("org_id", orgId)
+    .maybeSingle();
+
+  if (!issuer) {
+    const { data: newIssuer, error: insertErr } = await supabaseAdmin
+      .from("issuers")
+      .insert({ org_id: orgId, onboarding_status: "incomplete" })
+      .select("id")
+      .single();
+    if (insertErr) throw new Error("Failed to initialize issuer record.");
+    issuer = newIssuer;
+  }
+
   const docType = formData.get("doc_type");
   const password = formData.get("document_password");
   const file = formData.get("file");
 
   if (!docType || !file || file.size === 0) {
-    throw new Error("Document type and file are required");
+    throw new Error("Document type and file are required.");
   }
 
   const fileExt = file.name.split(".").pop();
@@ -294,7 +362,7 @@ export async function saveStage3Doc(formData) {
     .upload(filePath, file, { upsert: true });
 
   if (uploadError)
-    throw new Error("Failed to upload document: " + uploadError.message);
+    throw new Error("Failed to upload document.");
 
   const {
     data: { publicUrl },
@@ -304,7 +372,7 @@ export async function saveStage3Doc(formData) {
   const { data: existing } = await supabaseAdmin
     .from("issuer_docs")
     .select("id, url")
-    .eq("issuer_id", orgId)
+    .eq("issuer_id", issuer.id)
     .eq("doc_type", docType)
     .maybeSingle();
 
@@ -324,11 +392,11 @@ export async function saveStage3Doc(formData) {
         uploaded_at: new Date().toISOString(),
       })
       .eq("id", existing.id);
-    if (error) throw new Error("Failed to update doc: " + error.message);
+    if (error) throw new Error("Failed to update document.");
   } else {
     const { error } = await supabaseAdmin.from("issuer_docs").insert([
       {
-        issuer_id: orgId,
+        issuer_id: issuer.id,
         doc_type: docType,
         document_password: password ? encrypt(password) : null,
         url: fileUrl,
@@ -336,7 +404,7 @@ export async function saveStage3Doc(formData) {
         uploaded_at: new Date().toISOString(),
       },
     ]);
-    if (error) throw new Error("Failed to insert doc: " + error.message);
+    if (error) throw new Error("Failed to insert document.");
   }
 
   revalidatePath("/issuer-portal/onboarding");
@@ -347,13 +415,21 @@ export async function updateDocPassword(docType, password) {
   const { userId, orgId } = await auth();
   if (!userId || !orgId) throw new Error("Organization context required");
 
+  const { data: issuer } = await supabaseAdmin
+    .from("issuers")
+    .select("id")
+    .eq("org_id", orgId)
+    .maybeSingle();
+
+  if (!issuer) throw new Error("Issuer record not found.");
+
   const { error } = await supabaseAdmin
     .from("issuer_docs")
     .update({ document_password: password ? encrypt(password) : null })
-    .eq("issuer_id", orgId)
+    .eq("issuer_id", issuer.id)
     .eq("doc_type", docType);
 
-  if (error) throw new Error("Failed to update document password: " + error.message);
+  if (error) throw new Error("Failed to update document password.");
 
   revalidatePath("/issuer-portal/onboarding");
   return { success: true };
@@ -371,7 +447,7 @@ export async function saveStage4Banking(bankDetails) {
     })
     .eq("org_id", orgId);
 
-  if (error) throw new Error("Failed to save bank details: " + error.message);
+  if (error) throw new Error("Failed to save bank details.");
   revalidatePath("/issuer-portal/onboarding");
   return { success: true };
 }
@@ -394,7 +470,7 @@ export async function submitApplication() {
     })
     .eq("org_id", orgId);
 
-  if (error) throw new Error("Failed to submit application: " + error.message);
+  if (error) throw new Error("Failed to submit application.");
   revalidatePath("/issuer-portal/onboarding");
   return { success: true };
 }
@@ -410,15 +486,19 @@ export async function updateCurrentStep(step) {
     .maybeSingle();
 
   const dbStep = data?.current_step || 1;
-  const highestStep = Math.max(dbStep, step);
+  const newHighestStep = Math.min(Math.max(dbStep, step), 5);
 
-  if (highestStep > dbStep) {
+  if (newHighestStep > dbStep) {
     const { error } = await supabaseAdmin
       .from("issuers")
-      .update({ current_step: highestStep })
+      .update({ current_step: newHighestStep })
       .eq("org_id", orgId);
-    if (error) throw new Error("Failed to update current step: " + error.message);
+
+    if (error) {
+      console.error("Failed to update current step:", error);
+      throw new Error("Failed to update current step.");
+    }
   }
 
-  return { success: true, current_step: highestStep };
+  return { success: true, current_step: newHighestStep };
 }

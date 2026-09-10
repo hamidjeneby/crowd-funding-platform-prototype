@@ -32,6 +32,8 @@ export default function Stage1PersonalInfo({ data, onSave, onNext }) {
     : "";
 
   const [savingType, setSavingType] = useState(null);
+  const [formError, setFormError] = useState(null);
+  const [successMsg, setSuccessMsg] = useState(null);
   const [countries, setCountries] = useState(() => {
     return allCountries.filter(c => ALLOWED_COUNTRIES.includes(c.isoCode));
   });
@@ -82,6 +84,8 @@ export default function Stage1PersonalInfo({ data, onSave, onNext }) {
 
   const onSubmit = async (formData) => {
     setSavingType("next");
+    setFormError(null);
+    setSuccessMsg(null);
     try {
       await saveStage1Individual(formData);
       onSave({
@@ -92,7 +96,7 @@ export default function Stage1PersonalInfo({ data, onSave, onNext }) {
       onNext();
     } catch (error) {
       console.error(error);
-      alert(error.message);
+      setFormError("An error occurred while saving your details. Please try again.");
     } finally {
       setSavingType(null);
     }
@@ -101,6 +105,8 @@ export default function Stage1PersonalInfo({ data, onSave, onNext }) {
   const onSaveDraft = async () => {
     const formData = watch();
     setSavingType("draft");
+    setFormError(null);
+    setSuccessMsg(null);
     try {
       await saveStage1Individual(formData);
       onSave({
@@ -108,10 +114,10 @@ export default function Stage1PersonalInfo({ data, onSave, onNext }) {
         email: formData.personal_email,
         phone: formData.personal_phone_number
       });
-      alert("Draft saved successfully.");
+      setSuccessMsg("Draft saved successfully.");
     } catch (error) {
       console.error(error);
-      alert(error.message);
+      setFormError("An error occurred while saving your details. Please try again.");
     } finally {
       setSavingType(null);
     }
@@ -119,6 +125,16 @@ export default function Stage1PersonalInfo({ data, onSave, onNext }) {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      {formError && (
+        <div className="p-4 text-sm text-red-700 bg-red-50 rounded-xl border border-red-200">
+          {formError}
+        </div>
+      )}
+      {successMsg && (
+        <div className="p-4 text-sm text-emerald-700 bg-emerald-50 rounded-xl border border-emerald-200">
+          {successMsg}
+        </div>
+      )}
       <p className="text-sm text-gray-500 mb-4">
         Fields marked with <span className="text-red-500">*</span> are required.
       </p>

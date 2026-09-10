@@ -1,44 +1,26 @@
-import { currentUser } from "@clerk/nextjs/server";
-import { createClient } from "@supabase/supabase-js";
-import Link from "next/link";
+import { auth } from "@clerk/nextjs/server";
+import { supabaseAdmin } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 
 export default async function ProtectedIssuerLayout({ children }) {
-  const user = await currentUser();
+  const { userId, orgId } = await auth();
 
-  if (!user) return null; // Should be caught by root issuer-portal layout
+  if (!userId) {
+    redirect("/issuer/sign-in");
+  }
 
-  const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY,
-  );
+  // Issuers MUST be a part of an organization (org_id is strictly required)
+  if (!orgId) {
+    redirect("/issuer-portal/onboarding");
+  }
 
-  const { data } = await supabaseAdmin
+  const { data: issuer } = await supabaseAdmin
     .from("issuers")
-    .select(
-      "legal_entity_name, country, city, business_email, business_phone_number, business_type, license_authority, trade_license_number, bank_details",
-    )
-    .eq("user_id", user.id)
-    .single();
+    .select("onboarding_status")
+    .eq("org_id", orgId)
+    .maybeSingle();
 
-  // Check if all fields are filled
-  const requiredFields = [
-    "legal_entity_name",
-    "country",
-    "city",
-    "business_email",
-    "business_phone_number",
-    "business_type",
-    "license_authority",
-    "trade_lisence_number",
-    "bank_details",
-  ];
-
-  const isFullyOnboarded = data
-    ? requiredFields.every(
-        (field) => data[field] !== null && data[field] !== "",
-      )
-    : false;
+  const isFullyOnboarded = issuer?.onboarding_status && issuer.onboarding_status !== "incomplete";
 
   if (!isFullyOnboarded) {
     redirect("/issuer-portal/onboarding");
