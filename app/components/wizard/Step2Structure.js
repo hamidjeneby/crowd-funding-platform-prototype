@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -72,7 +72,7 @@ const schema = z
         });
       }
 
-      if (data.conversion_enabled) {
+      if (data.sharia_contract_type !== "spv_equity" && data.conversion_enabled) {
         if (
           data.conversion_trigger_value === undefined ||
           isNaN(data.conversion_trigger_value) ||
@@ -121,16 +121,21 @@ export default function Step2Structure({
   const savedAuthority = spvDetail?.registration_authority || "";
   const isPredefinedAuth = PREDEFINED_AUTHORITIES.includes(savedAuthority);
 
+  const initialContractType = initialData?.sharia_contract_type || undefined;
+  const initialIsSpv =
+    initialContractType === "spv_equity" ? true : initialData?.is_spv || false;
+
   const {
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(schema),
     defaultValues: {
-      sharia_contract_type: initialData?.sharia_contract_type || undefined,
-      is_spv: initialData?.is_spv || false,
+      sharia_contract_type: initialContractType,
+      is_spv: initialIsSpv,
       spv_legal_name: spvDetail?.spv_legal_name || "",
       registration_authority: savedAuthority
         ? isPredefinedAuth
@@ -139,16 +144,35 @@ export default function Step2Structure({
         : undefined,
       custom_registration_authority: isPredefinedAuth ? "" : savedAuthority,
       registration_number: spvDetail?.registration_number || "",
-      conversion_enabled: spvDetail?.conversion_enabled || false,
+      conversion_enabled:
+        initialContractType === "spv_equity"
+          ? false
+          : spvDetail?.conversion_enabled || false,
       conversion_trigger_value: spvDetail?.conversion_trigger_value ?? "",
       conversion_ratio_shares: spvDetail?.conversion_ratio_shares ?? "",
       conversion_deadline: spvDetail?.conversion_deadline || "",
     },
   });
 
+  const shariaContractType = watch("sharia_contract_type");
   const isSpv = watch("is_spv");
   const registrationAuthority = watch("registration_authority");
   const conversionEnabled = watch("conversion_enabled");
+
+  // Synchronize is_spv and conversion_enabled based on selected Sharia Contract Type
+  useEffect(() => {
+    if (shariaContractType === "spv_equity") {
+      setValue("is_spv", true);
+      setValue("conversion_enabled", false);
+    }
+  }, [shariaContractType, setValue]);
+
+  // Reset conversion_enabled if SPV is unchecked or contract type is SPV Equity
+  useEffect(() => {
+    if (!isSpv || shariaContractType === "spv_equity") {
+      setValue("conversion_enabled", false);
+    }
+  }, [isSpv, shariaContractType, setValue]);
 
   const onSubmit = async (data) => {
     if (disabled) return onNext();
@@ -160,8 +184,17 @@ export default function Step2Structure({
           ? data.custom_registration_authority?.trim()
           : data.registration_authority;
 
+      const isSpvActive =
+        data.sharia_contract_type === "spv_equity" || Boolean(data.is_spv);
+      const isConversionActive =
+        isSpvActive &&
+        data.sharia_contract_type !== "spv_equity" &&
+        Boolean(data.conversion_enabled);
+
       const payload = {
         ...data,
+        is_spv: isSpvActive,
+        conversion_enabled: isConversionActive,
         registration_authority: finalAuthority,
       };
 
@@ -208,14 +241,23 @@ export default function Step2Structure({
           type="checkbox"
           id="is_spv"
           {...register("is_spv")}
-          disabled={disabled}
-          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          disabled={disabled || shariaContractType === "spv_equity"}
+          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-60 disabled:cursor-not-allowed"
         />
         <label
           htmlFor="is_spv"
-          className="ml-2 block text-sm font-medium text-gray-900"
+          className={`ml-2 block text-sm font-medium ${
+            shariaContractType === "spv_equity"
+              ? "text-gray-700 font-semibold"
+              : "text-gray-900"
+          }`}
         >
           This project is an SPV
+          {shariaContractType === "spv_equity" && (
+            <span className="ml-2 text-xs font-normal text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+              Required for SPV Equity
+            </span>
+          )}
         </label>
       </div>
 
@@ -294,37 +336,39 @@ export default function Step2Structure({
             )}
           </div>
 
-          {/* Conversion Clause Checkbox */}
-          <div className="pt-2 border-t border-gray-200">
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="conversion_enabled"
-                {...register("conversion_enabled")}
-                disabled={disabled}
-                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <label
-                htmlFor="conversion_enabled"
-                className="ml-2 block text-sm font-medium text-gray-900 flex items-center"
-              >
-                Enable Conversion Clause
-                <span className="relative inline-block group ml-1.5 align-middle">
-                  <HelpCircle className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-pointer" />
-                  <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-72 p-2.5 bg-gray-900 text-white text-xs rounded-lg shadow-lg z-30 leading-relaxed font-normal">
-                    A conversion clause specifies the conditions under which an
-                    investment automatically transforms into equity shares in
-                    the company. Enabling this clause will make your project
-                    more attractive to investors
-                    <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></span>
+          {/* Conversion Clause Checkbox (Only available if SPV is checked AND contract type is NOT SPV Equity) */}
+          {shariaContractType !== "spv_equity" && (
+            <div className="pt-2 border-t border-gray-200">
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="conversion_enabled"
+                  {...register("conversion_enabled")}
+                  disabled={disabled}
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <label
+                  htmlFor="conversion_enabled"
+                  className="ml-2 block text-sm font-medium text-gray-900 flex items-center"
+                >
+                  Enable Conversion Clause
+                  <span className="relative inline-block group ml-1.5 align-middle">
+                    <HelpCircle className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-pointer" />
+                    <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-72 p-2.5 bg-gray-900 text-white text-xs rounded-lg shadow-lg z-30 leading-relaxed font-normal">
+                      A conversion clause specifies the conditions under which an
+                      investment automatically transforms into equity shares in
+                      the company. Enabling this clause will make your project
+                      more attractive to investors
+                      <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></span>
+                    </span>
                   </span>
-                </span>
-              </label>
+                </label>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Conversion Inputs */}
-          {conversionEnabled && (
+          {shariaContractType !== "spv_equity" && conversionEnabled && (
             <div className="p-4 border rounded-md bg-white space-y-4 shadow-sm">
               <h4 className="font-medium text-sm text-gray-900">
                 Conversion Terms
