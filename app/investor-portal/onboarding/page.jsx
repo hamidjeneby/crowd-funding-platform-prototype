@@ -1,16 +1,31 @@
-import { getOnboardingData } from "@/app/actions/investor-onboarding";
+import { getOnboardingData, setInvestorType } from "@/app/actions/investor-onboarding";
 import OnboardingFlow from "./components/OnboardingFlow";
 import TypeSelector from "./components/TypeSelector";
 import OrgGate from "@/app/components/auth/OrgGate";
 import { redirect } from "next/navigation";
+import { auth } from "@clerk/nextjs/server";
 
-export default async function InvestorOnboardingPage() {
+export default async function InvestorOnboardingPage({ searchParams }) {
+  const { orgId } = await auth();
+  const params = await searchParams;
+
   let data = { investor: {}, reps: [], docs: [] };
   
   try {
     data = await getOnboardingData();
   } catch (error) {
     console.error("Error fetching onboarding data:", error);
+  }
+
+  // If organization exists or ?type=institutional was passed, auto-select institutional type
+  if ((orgId || params?.type === "institutional") && (!data.investor.type || data.investor.type !== "institutional")) {
+    try {
+      await setInvestorType("institutional");
+      data = await getOnboardingData();
+    } catch (err) {
+      console.error("Error setting investor type to institutional:", err);
+      data.investor.type = "institutional";
+    }
   }
 
   const isPendingReview = data.investor.onboarding_status && data.investor.onboarding_status !== "incomplete";

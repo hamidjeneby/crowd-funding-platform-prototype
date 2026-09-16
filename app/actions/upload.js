@@ -5,11 +5,22 @@ import { supabaseAdmin } from "@/lib/supabase";
 
 /**
  * Ensures the user is authorized to edit the project draft.
+ * Returns userId, orgId, and issuerId (integer PK of issuers table).
  */
 async function verifyProjectAccess(projectId) {
   const { userId, orgId } = await auth();
   if (!userId || !orgId) {
     throw new Error("Unauthorized: Organization workspace required for Issuers.");
+  }
+
+  const { data: issuer, error: issuerError } = await supabaseAdmin
+    .from("issuers")
+    .select("id")
+    .eq("org_id", orgId)
+    .maybeSingle();
+
+  if (issuerError || !issuer) {
+    throw new Error("Issuer profile not found for this organization.");
   }
 
   const { data: project, error: projectError } = await supabaseAdmin
@@ -21,14 +32,14 @@ async function verifyProjectAccess(projectId) {
   if (projectError || !project) {
     throw new Error("Project not found");
   }
-  if (project.issuer_id !== orgId) {
+  if (project.issuer_id !== issuer.id) {
     throw new Error("Unauthorized: Project ownership mismatch");
   }
   if (project.status !== "draft") {
     throw new Error("Cannot modify files: Project is not in draft status");
   }
 
-  return { userId, orgId };
+  return { userId, orgId, issuerId: issuer.id };
 }
 
 /**
@@ -92,7 +103,7 @@ export async function authorizeUploadBatch(projectId, files) {
  * @param {Array} uploadedFiles - Array of { category, type, bucket, path, display_order, isCover }
  */
 export async function recordSuccessfulUploads(projectId, uploadedFiles) {
-  const { userId, orgId } = await verifyProjectAccess(projectId);
+  const { userId, issuerId } = await verifyProjectAccess(projectId);
   const results = { documents: 0, media: 0, cover: false };
 
   for (const file of uploadedFiles) {
@@ -105,7 +116,7 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
         // Always insert for 'other'
         await supabaseAdmin.from("project_docs").insert({
           project_id: projectId,
-          issuer_id: orgId,
+          issuer_id: issuerId,
           doc_type: "other",
           file_url: publicUrl,
           uploaded_by: userId,
@@ -117,7 +128,7 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
         
         await supabaseAdmin.from("project_docs").insert({
           project_id: projectId,
-          issuer_id: orgId,
+          issuer_id: issuerId,
           doc_type: file.type,
           file_url: publicUrl,
           uploaded_by: userId,
@@ -136,7 +147,7 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
         // Insert into project_media
         await supabaseAdmin.from("project_media").insert({
           project_id: projectId,
-          issuer_id: orgId,
+          issuer_id: issuerId,
           media_type: file.type,
           url: publicUrl,
           display_order: file.display_order || 0,
@@ -153,19 +164,19 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
  * Removes a file from storage and database.
  */
 export async function deleteProjectFile(projectId, fileUrl, category) {
-  const { userId, orgId } = await verifyProjectAccess(projectId);
+  const { issuerId } = await verifyProjectAccess(projectId);
 
   if (category === "document") {
     const urlParts = fileUrl.split("/project_docs/");
     if (urlParts.length === 2) {
       await supabaseAdmin.storage.from("project_docs").remove([urlParts[1]]);
-      await supabaseAdmin.from("project_docs").delete().eq("file_url", fileUrl).eq("issuer_id", orgId);
+      await supabaseAdmin.from("project_docs").delete().eq("file_url", fileUrl).eq("issuer_id", issuerId);
     }
   } else if (category === "media") {
     const urlParts = fileUrl.split("/project_media/");
     if (urlParts.length === 2) {
       await supabaseAdmin.storage.from("project_media").remove([urlParts[1]]);
-      await supabaseAdmin.from("project_media").delete().eq("url", fileUrl).eq("issuer_id", orgId);
+      await supabaseAdmin.from("project_media").delete().eq("url", fileUrl).eq("issuer_id", issuerId);
     }
   } else if (category === "cover") {
     const urlParts = fileUrl.split("/cover_img/");

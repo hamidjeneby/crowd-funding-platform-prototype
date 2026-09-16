@@ -4,6 +4,29 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 
 /**
+ * Syncs organization type to Supabase `organizations` table AND updates Clerk Organization publicMetadata.
+ * Ensures metadata.type = "investor" (or "issuer") and metadata.role = "investor" (or "issuer").
+ */
+export async function syncOrganizationTypeAndMetadata(orgId, orgType) {
+  if (!orgId || !orgType) return;
+
+  // 1. Update/Upsert Supabase `organizations` table
+  await supabaseAdmin
+    .from("organizations")
+    .upsert({ org_id: orgId, type: orgType }, { onConflict: "org_id" });
+
+  // 2. Update Clerk Organization publicMetadata
+  try {
+    const client = await clerkClient();
+    await client.organizations.updateOrganizationMetadata(orgId, {
+      publicMetadata: { type: orgType, role: orgType },
+    });
+  } catch (err) {
+    console.error("Error updating Clerk organization metadata:", err);
+  }
+}
+
+/**
  * Server action to create and send an organization invitation using Clerk SDK.
  * Passes redirectUrl pointing directly to ${process.env.NEXT_PUBLIC_APP_URL}/accept-invitation.
  */

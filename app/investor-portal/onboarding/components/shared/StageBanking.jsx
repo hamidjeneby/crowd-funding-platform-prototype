@@ -11,7 +11,7 @@ import { saveStage4Banking } from "@/app/actions/investor-onboarding";
 const bankingSchema = z.object({
   bank_name: z.string().min(2, "Bank name is required"),
   account_name: z.string().min(2, "Account holder name is required"),
-  account_number: z.string().min(5, "Account number must be at least 5 characters"),
+  account_number: z.string().min(7, "Account number must be more than 6 characters"),
   iban: z.string().min(1, "IBAN is required").refine(val => isValidIBAN(val.replace(/\s+/g, '')), {
     message: "Invalid IBAN number",
   }),

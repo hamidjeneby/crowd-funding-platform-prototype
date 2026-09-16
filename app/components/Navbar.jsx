@@ -25,8 +25,13 @@ export default function Navbar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Hide Navbar completely on issuer portal
-  if (pathname?.startsWith("/issuer-portal")) {
+  // Hide Navbar completely on investor & issuer portals, onboarding, sign-in, and sign-up pages
+  if (
+    pathname?.startsWith("/investor-portal") ||
+    pathname?.startsWith("/issuer-portal") ||
+    pathname?.startsWith("/investor") ||
+    pathname?.startsWith("/issuer")
+  ) {
     return null;
   }
 

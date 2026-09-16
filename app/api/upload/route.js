@@ -24,6 +24,17 @@ export async function POST(request) {
       );
     }
 
+    // Retrieve issuer record by orgId
+    const { data: issuer, error: issuerError } = await supabaseAdmin
+      .from("issuers")
+      .select("id")
+      .eq("org_id", orgId)
+      .maybeSingle();
+
+    if (issuerError || !issuer) {
+      return NextResponse.json({ error: "Issuer profile not found for this organization" }, { status: 404 });
+    }
+
     // Verify project ownership and draft status
     const { data: project, error: projectError } = await supabaseAdmin
       .from("projects")
@@ -35,7 +46,7 @@ export async function POST(request) {
       console.error("Upload error - Project lookup failed. projectId:", projectId, "error:", projectError);
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
-    if (project.issuer_id !== orgId) {
+    if (project.issuer_id !== issuer.id) {
       return NextResponse.json(
         { error: "Unauthorized: Project ownership mismatch" },
         { status: 403 },
@@ -62,13 +73,13 @@ export async function POST(request) {
             .from("project_docs")
             .delete()
             .eq("file_url", oldFileUrl)
-            .eq("issuer_id", orgId);
+            .eq("issuer_id", issuer.id);
         } else if (bucket === "project_media") {
           await supabaseAdmin
             .from("project_media")
             .delete()
             .eq("url", oldFileUrl)
-            .eq("issuer_id", orgId);
+            .eq("issuer_id", issuer.id);
         }
       }
     }
@@ -106,7 +117,7 @@ export async function POST(request) {
         .from("project_docs")
         .insert({
           project_id: projectId,
-          issuer_id: orgId,
+          issuer_id: issuer.id,
           doc_type: docType,
           file_url: publicUrl,
           uploaded_by: userId,
@@ -135,7 +146,7 @@ export async function POST(request) {
         .from("project_media")
         .insert({
           project_id: projectId,
-          issuer_id: orgId,
+          issuer_id: issuer.id,
           media_type: mediaType,
           url: publicUrl,
           display_order: nextOrder,

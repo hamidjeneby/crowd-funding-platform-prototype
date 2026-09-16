@@ -41,12 +41,10 @@ export default function OrgGate({
       if (setActive) {
         await setActive({ organization: orgId });
       }
-      if (redirectUrl && redirectUrl !== "#") {
-        router.push(redirectUrl);
-      }
+      const targetUrl = redirectUrl && redirectUrl !== "#" ? redirectUrl : "/issuer-portal/onboarding";
+      window.location.href = targetUrl;
     } catch (err) {
       console.error("Error switching organization:", err);
-    } finally {
       setSelectingOrgId(null);
     }
   };

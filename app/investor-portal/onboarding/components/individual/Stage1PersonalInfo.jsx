@@ -22,6 +22,7 @@ const stage1Schema = z.object({
   nationality: z.string().min(1, "Nationality is required"),
   id_number: z.string().min(1, "National ID / Passport number is required"),
   net_worth: z.string().min(1, "Net worth is required").refine(val => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, "Must be a valid positive number"),
+  annual_income: z.string().min(1, "Annual income is required").refine(val => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, "Must be a valid positive number"),
   investment_experience_years: z.string().min(1, "Investment experience is required").refine(val => !isNaN(parseInt(val, 10)) && parseInt(val, 10) >= 0, "Must be a valid number of years"),
 });
 
@@ -60,6 +61,7 @@ export default function Stage1PersonalInfo({ data, onSave, onNext }) {
       nationality: data.nationality || "",
       id_number: data.id_number || "",
       net_worth: data.net_worth ? data.net_worth.toString() : "",
+      annual_income: data.annual_income ? data.annual_income.toString() : "",
       investment_experience_years: data.investment_experience_years !== null && data.investment_experience_years !== undefined ? data.investment_experience_years.toString() : "",
     }
   });
@@ -237,6 +239,16 @@ export default function Stage1PersonalInfo({ data, onSave, onNext }) {
             type="number" 
             step="0.01"
             {...register("net_worth")} 
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[#064e3b] focus:ring-[#064e3b] sm:text-sm p-2 border" 
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Annual Income (AED) <span className="text-red-500">*</span></label>
+          <input 
+            type="number" 
+            step="0.01"
+            {...register("annual_income")} 
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[#064e3b] focus:ring-[#064e3b] sm:text-sm p-2 border" 
           />
         </div>

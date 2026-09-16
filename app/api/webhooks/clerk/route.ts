@@ -165,6 +165,16 @@ export async function POST(req: Request) {
         throw error;
       }
 
+      // Update Clerk organization publicMetadata to tag it as investor or issuer
+      try {
+        const client = await clerkClient();
+        await client.organizations.updateOrganizationMetadata(id, {
+          publicMetadata: { type: orgType, role: orgType },
+        });
+      } catch (metaErr) {
+        console.error("Error setting Clerk organization metadata in webhook:", metaErr);
+      }
+
       if (orgType === "issuer") {
         const { data: existingIssuer } = await supabaseAdmin
           .from("issuers")

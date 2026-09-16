@@ -80,7 +80,7 @@ export default function Sidebar() {
             hidePersonal
             createOrganizationMode="modal"
             organizationProfileMode="modal"
-            afterCreateOrganizationUrl="/issuer-portal"
+            afterCreateOrganizationUrl="/issuer-portal/onboarding"
             afterSelectOrganizationUrl="/issuer-portal"
             appearance={{
               elements: {
@@ -133,7 +133,11 @@ export default function Sidebar() {
           {/* Create / Switch Organization Button */}
           <button
             type="button"
-            onClick={() => clerk.openCreateOrganization()}
+            onClick={() =>
+              clerk.openCreateOrganization({
+                afterCreateOrganizationUrl: "/issuer-portal/onboarding",
+              })
+            }
             className="w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium text-sm text-[#064e3b] hover:bg-[#ecfdf5]"
           >
             <Repeat className="w-5 h-5 opacity-70" />

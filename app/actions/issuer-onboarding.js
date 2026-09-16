@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { encrypt, decrypt } from "@/app/utils/crypto";
+import { syncOrganizationTypeAndMetadata } from "@/app/actions/organization";
 
 export async function syncOrganizationAndMembership(
   orgId,
@@ -15,7 +16,9 @@ export async function syncOrganizationAndMembership(
 ) {
   if (!orgId || !userId) return;
 
-  // 1. Create/Update organization record with correct type ("issuer" or "investor")
+  // 1. Create/Update organization record with correct type ("issuer" or "investor") & Clerk metadata
+  await syncOrganizationTypeAndMetadata(orgId, orgType);
+
   const { data: existingOrg } = await supabaseAdmin
     .from("organizations")
     .select("id, type, created_by")

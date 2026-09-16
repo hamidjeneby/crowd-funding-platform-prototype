@@ -206,10 +206,40 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
                 <div>
                   <dt className="text-gray-500">SPV Registration</dt>
                   <dd className="font-medium text-gray-900">
-                    {projectData.spv_details[0].registration_authority || "—"} 
+                    {projectData.spv_details[0].registration_authority || "—"}{" "}
                     ({projectData.spv_details[0].registration_number || "—"})
                   </dd>
                 </div>
+                {projectData.spv_details[0].conversion_enabled && (
+                  <>
+                    <div>
+                      <dt className="text-gray-500">Conversion Clause</dt>
+                      <dd className="font-medium text-gray-900">Enabled</dd>
+                    </div>
+                    <div>
+                      <dt className="text-gray-500">Trigger Share Price</dt>
+                      <dd className="font-medium text-gray-900">
+                        {projectData.spv_details[0].conversion_trigger_value != null
+                          ? `$${projectData.spv_details[0].conversion_trigger_value}`
+                          : "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-gray-500">Conversion Ratio</dt>
+                      <dd className="font-medium text-gray-900">
+                        {projectData.spv_details[0].conversion_ratio_shares != null
+                          ? `1 Sukuk unit = ${projectData.spv_details[0].conversion_ratio_shares} shares`
+                          : "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-gray-500">Conversion Deadline</dt>
+                      <dd className="font-medium text-gray-900">
+                        {projectData.spv_details[0].conversion_deadline || "—"}
+                      </dd>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </dl>

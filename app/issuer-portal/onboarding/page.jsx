@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { getOnboardingData } from "@/app/actions/issuer-onboarding";
 import OnboardingFlow from "./components/OnboardingFlow";
+import OnboardingHeader from "./components/OnboardingHeader";
 import OrgGate from "@/app/components/auth/OrgGate";
 import { redirect } from "next/navigation";
 
@@ -26,7 +27,7 @@ export default async function IssuerOnboardingPage() {
           <OrgGate
             title="Issuer Organization Required"
             subtitle="To create campaigns and onboard as an Issuer, please select or create your corporate organization."
-            redirectUrl="/issuer-portal/onboarding"
+            redirectUrl="/issuer-portal"
           />
         </div>
       </div>
@@ -50,16 +51,14 @@ export default async function IssuerOnboardingPage() {
     redirect("/issuer-portal");
   }
 
-  // 4. User HAS an organization BUT IS NOT fully onboarded -> Render Onboarding Flow
+  // 4. User HAS an organization BUT IS NOT fully onboarded -> Render Onboarding Flow with Header & Org Switcher
   return (
     <div className="min-h-screen bg-[#fcfaf5] py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
-        <div className="mb-8 text-center">
-          <h1 className="text-3xl font-extrabold text-[#064e3b]">Issuer Onboarding</h1>
-          <p className="mt-2 text-sm text-gray-600">
-            Please complete your organization onboarding details to access the issuer dashboard.
-          </p>
-        </div>
+        <OnboardingHeader
+          title="Issuer Onboarding"
+          subtitle="Please complete your organization onboarding details below. You can switch active workspaces using the workspace switcher on the right."
+        />
 
         <OnboardingFlow initialData={data} />
       </div>

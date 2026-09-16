@@ -11,9 +11,9 @@ import {
 } from "lucide-react";
 
 export default async function ProjectsPage() {
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
 
-  if (!userId) {
+  if (!userId || !orgId) {
     return <div>Unauthorized</div>;
   }
 
@@ -21,16 +21,26 @@ export default async function ProjectsPage() {
   let fetchError = null;
 
   try {
-    const { data, error } = await supabaseAdmin
-      .from("projects")
-      .select("*, project_media(id)")
-      .eq("issuer_id", userId)
-      .order("created_at", { ascending: false });
+    const { data: issuer, error: issuerError } = await supabaseAdmin
+      .from("issuers")
+      .select("id")
+      .eq("org_id", orgId)
+      .maybeSingle();
 
-    if (error) {
-      throw error;
+    if (issuerError || !issuer) {
+      projects = [];
+    } else {
+      const { data, error } = await supabaseAdmin
+        .from("projects")
+        .select("*, project_media(id)")
+        .eq("issuer_id", issuer.id)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+      projects = data || [];
     }
-    projects = data || [];
   } catch (err) {
     console.error("Error fetching projects:", err);
     fetchError =
