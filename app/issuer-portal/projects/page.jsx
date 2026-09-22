@@ -176,52 +176,27 @@ export default async function ProjectsPage() {
                     </div>
                   )}
 
-                  <div className="mt-auto pt-4 flex gap-3 border-t border-gray-100">
-                    <div className="flex-1 group relative">
-                      <Link
-                        href={`/issuer-portal/projects/${project.id}/edit`}
-                        className={`flex items-center justify-center w-full py-2.5 px-4 rounded-lg border text-sm font-bold transition-all ${
-                          isDraft
-                            ? "border-gray-300 text-gray-700 bg-white hover:bg-gray-50 hover:border-gray-400 hover:shadow-sm"
-                            : "border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed pointer-events-none"
-                        }`}
-                        aria-disabled={!isDraft}
-                        tabIndex={!isDraft ? -1 : undefined}
-                      >
-                        <Edit className="w-4 h-4 mr-2" />
-                        Edit
-                      </Link>
-                      {!isDraft && (
-                        <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-max max-w-[200px] opacity-0 transition-opacity duration-200 group-hover:opacity-100 bg-gray-900 text-white text-xs leading-relaxed rounded-md py-2 px-3 z-20 text-center shadow-lg">
-                          your project is not in draft mode it cannot be edited
-                          at this time
-                          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
-                        </div>
+                  <div className="mt-auto pt-4 border-t border-gray-100">
+                    <Link
+                      href={`/issuer-portal/projects/${project.slug || project.id}/edit`}
+                      className={`flex items-center justify-center w-full py-2.5 px-4 rounded-xl text-sm font-bold transition-all shadow-sm ${
+                        isDraft
+                          ? "bg-[#064e3b] text-white hover:bg-[#064e3b]/90 hover:shadow-md"
+                          : "bg-gray-100 text-gray-800 hover:bg-gray-200 hover:shadow-md border border-gray-200"
+                      }`}
+                    >
+                      {isDraft ? (
+                        <>
+                          <Edit className="w-4 h-4 mr-2" />
+                          Edit
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="w-4 h-4 mr-2" />
+                          View
+                        </>
                       )}
-                    </div>
-
-                    <div className="flex-1 group relative">
-                      <Link
-                        href={`/issuer-portal/projects/${project.id}/view`}
-                        className={`flex items-center justify-center w-full py-2.5 px-4 rounded-lg border text-sm font-bold transition-all ${
-                          !isDraft
-                            ? "border-[#064e3b] text-[#064e3b] bg-white hover:bg-[#064e3b]/5 hover:shadow-sm"
-                            : "border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed pointer-events-none"
-                        }`}
-                        aria-disabled={isDraft}
-                        tabIndex={isDraft ? -1 : undefined}
-                      >
-                        <Eye className="w-4 h-4 mr-2" />
-                        View
-                      </Link>
-                      {isDraft && (
-                        <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-max max-w-[220px] opacity-0 transition-opacity duration-200 group-hover:opacity-100 bg-gray-900 text-white text-xs leading-relaxed rounded-md py-2 px-3 z-20 text-center shadow-lg">
-                          you cannot view a project that has not been submitted
-                          for review
-                          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
-                        </div>
-                      )}
-                    </div>
+                    </Link>
                   </div>
                 </div>
               </div>

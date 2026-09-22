@@ -91,6 +91,7 @@ export async function authorizeUploadBatch(projectId, files) {
       path: data.path || path,
       bucket,
       isCover: !!file.isCover,
+      display_order: file.display_order ?? 1,
     });
   }
 
@@ -145,12 +146,13 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
         results.cover = true;
       } else {
         // Insert into project_media
+        const orderVal = file.display_order !== undefined && file.display_order !== null && Number(file.display_order) > 0 ? Number(file.display_order) : 1;
         await supabaseAdmin.from("project_media").insert({
           project_id: projectId,
           issuer_id: issuerId,
           media_type: file.type,
           url: publicUrl,
-          display_order: file.display_order || 0,
+          display_order: orderVal,
         });
         results.media++;
       }
@@ -158,6 +160,35 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
   }
 
   return results;
+}
+
+/**
+ * Updates display_order for project_media items.
+ * @param {string} projectId 
+ * @param {Array<{ id?: string|number, url?: string, display_order: number }>} mediaOrders 
+ */
+export async function updateMediaOrder(projectId, mediaOrders) {
+  const { issuerId } = await verifyProjectAccess(projectId);
+
+  for (const item of mediaOrders) {
+    if (item.url) {
+      await supabaseAdmin
+        .from("project_media")
+        .update({ display_order: Number(item.display_order) })
+        .eq("project_id", projectId)
+        .eq("issuer_id", issuerId)
+        .eq("url", item.url);
+    } else if (item.id) {
+      await supabaseAdmin
+        .from("project_media")
+        .update({ display_order: Number(item.display_order) })
+        .eq("project_id", projectId)
+        .eq("issuer_id", issuerId)
+        .eq("id", item.id);
+    }
+  }
+
+  return { success: true };
 }
 
 /**

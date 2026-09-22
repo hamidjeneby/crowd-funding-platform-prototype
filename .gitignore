@@ -4,8 +4,8 @@
 .open-next/
 .wrangler/
 
-#Project Specs
-project-spec.md
+#MD Files
+
 
 # dependencies
 /node_modules

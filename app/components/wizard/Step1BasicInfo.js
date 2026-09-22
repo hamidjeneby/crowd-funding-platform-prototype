@@ -6,7 +6,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { updateProjectDraft } from "@/app/actions/projects";
+import { updateProjectDraft, getProjectMilestones } from "@/app/actions/projects";
+import { Plus, Trash2, Calendar, Flag } from "lucide-react";
 
 const schema = z.object({
   title: z.string().min(1, "Title is required"),
@@ -18,8 +19,6 @@ const schema = z.object({
     }),
 });
 
-// Restricted extension set: bold, italic, ONE heading size, lists, paragraphs.
-// No code blocks, blockquotes, horizontal rules, strikethrough, links, or images.
 const editorExtensions = [
   StarterKit.configure({
     heading: { levels: [2] },
@@ -56,6 +55,9 @@ export default function Step1BasicInfo({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // Issuer Milestones repeatable state
+  const [milestones, setMilestones] = useState([]);
+
   const {
     register,
     handleSubmit,
@@ -72,9 +74,6 @@ export default function Step1BasicInfo({
     },
   });
 
-  // initialData often arrives asynchronously (fetched after this component mounts).
-  // defaultValues only apply on first render, so title/summary need an explicit
-  // resync once the real data shows up.
   useEffect(() => {
     if (initialData) {
       reset({
@@ -85,7 +84,29 @@ export default function Step1BasicInfo({
     }
   }, [initialData, reset]);
 
-  const summaryValue = watch("summary");
+  // Load existing issuer milestones
+  useEffect(() => {
+    async function loadMilestones() {
+      if (!projectId) return;
+      try {
+        const allMs = await getProjectMilestones(projectId);
+        const issuerMs = (allMs || []).filter((m) => m.milestone_source === "issuer");
+        setMilestones(
+          issuerMs.map((m) => ({
+            id: m.id,
+            title: m.title || "",
+            description: m.description || "",
+            target_date: m.target_date ? m.target_date.split("T")[0] : "",
+          }))
+        );
+      } catch (e) {
+        console.error("Error loading project milestones:", e);
+      }
+    }
+    loadMilestones();
+  }, [projectId]);
+
+  const summaryValue = watch("summary") || "";
 
   const editor = useEditor({
     extensions: editorExtensions,
@@ -96,9 +117,6 @@ export default function Step1BasicInfo({
     },
   });
 
-  // The editor's own DOM content is a separate thing from react-hook-form's
-  // internal value above -- reset() alone won't repaint what's on screen.
-  // This keeps the visible editor in sync if initialData changes after mount.
   useEffect(() => {
     if (editor && initialData?.full_description !== undefined) {
       const current = editor.getHTML();
@@ -106,20 +124,42 @@ export default function Step1BasicInfo({
         editor.commands.setContent(initialData.full_description || "", false);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialData?.full_description, editor]);
 
-  // Tiptap's `editable` option is only read at creation time -- toggling the
-  // `disabled` prop later requires calling setEditable() directly.
   useEffect(() => {
     editor?.setEditable(!disabled);
   }, [disabled, editor]);
+
+  // Milestone list handlers
+  const addMilestone = () => {
+    setMilestones((prev) => [
+      ...prev,
+      { title: "", description: "", target_date: "" },
+    ]);
+  };
+
+  const updateMilestone = (index, field, value) => {
+    setMilestones((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: value };
+      return updated;
+    });
+  };
+
+  const removeMilestone = (index) => {
+    setMilestones((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const onSubmit = async (data) => {
     setLoading(true);
     setError(null);
     try {
-      await updateProjectDraft(projectId, data, 1);
+      const payload = {
+        ...data,
+        issuer_milestones: milestones,
+      };
+
+      await updateProjectDraft(projectId, payload, 1);
       await onUpdate();
       onNext();
     } catch (err) {
@@ -129,9 +169,6 @@ export default function Step1BasicInfo({
     }
   };
 
-  // When this step is locked (project under review), skip validation
-  // entirely -- old data that predates a validation rule (e.g. a summary
-  // saved before the 150-char limit existed) must never block navigation.
   const handleFormSubmit = disabled
     ? (e) => {
         e.preventDefault();
@@ -259,11 +296,108 @@ export default function Step1BasicInfo({
         )}
       </div>
 
+      {/* REPEATABLE ISSUER MILESTONES BLOCK */}
+      <div className="border-t pt-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-bold text-[#064e3b] flex items-center gap-2">
+              <Flag className="w-4 h-4 text-[#059669]" /> Project Milestones & Target Dates
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Define key execution milestones for your project roadmap.
+            </p>
+          </div>
+          {!disabled && (
+            <button
+              type="button"
+              onClick={addMilestone}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 text-[#059669] border border-emerald-200 hover:bg-emerald-100 transition-all cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Milestone
+            </button>
+          )}
+        </div>
+
+        {milestones.length > 0 ? (
+          <div className="space-y-4">
+            {milestones.map((ms, idx) => (
+              <div
+                key={idx}
+                className="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-3 relative"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-[#064e3b] uppercase tracking-wider">
+                    Milestone #{idx + 1}
+                  </span>
+                  {!disabled && (
+                    <button
+                      type="button"
+                      onClick={() => removeMilestone(idx)}
+                      className="text-gray-400 hover:text-red-600 transition-colors p-1"
+                      title="Remove milestone"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700">
+                      Milestone Title
+                    </label>
+                    <input
+                      type="text"
+                      value={ms.title}
+                      onChange={(e) => updateMilestone(idx, "title", e.target.value)}
+                      disabled={disabled}
+                      placeholder="e.g. Site Acquisition & Permits"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 text-sm border bg-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700">
+                      Target Date
+                    </label>
+                    <input
+                      type="date"
+                      value={ms.target_date}
+                      onChange={(e) => updateMilestone(idx, "target_date", e.target.value)}
+                      disabled={disabled}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 text-sm border bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700">
+                    Description
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={ms.description}
+                    onChange={(e) => updateMilestone(idx, "description", e.target.value)}
+                    disabled={disabled}
+                    placeholder="Brief description of the milestone execution plan..."
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 text-sm border bg-white"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="p-4 rounded-xl bg-gray-50 border border-dashed border-gray-200 text-center text-xs text-gray-500">
+            No issuer milestones added yet. Click &quot;Add Milestone&quot; above to include project targets.
+          </div>
+        )}
+      </div>
+
       <div className="flex justify-end">
         <button
           type="submit"
           disabled={loading || summaryValue.length > 150}
-          className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#064e3b] hover:bg-[#064e3b]/90 disabled:opacity-50"
+          className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#064e3b] hover:bg-[#064e3b]/90 disabled:opacity-50 cursor-pointer"
         >
           {loading ? "Saving..." : disabled ? "Next" : "Save & Continue"}
         </button>

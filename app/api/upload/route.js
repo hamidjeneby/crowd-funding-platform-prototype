@@ -140,7 +140,7 @@ export async function POST(request) {
       const nextOrder =
         existingMedia && existingMedia.length > 0
           ? existingMedia[0].display_order + 1
-          : 0;
+          : 1;
 
       const { data, error } = await supabaseAdmin
         .from("project_media")

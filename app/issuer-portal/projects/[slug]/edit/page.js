@@ -25,7 +25,8 @@ const STEPS = [
 ];
 
 function ProjectWizardPage() {
-  const { id: projectId } = useParams();
+  const params = useParams();
+  const slug = params?.slug;
   const { getToken, isLoaded, userId } = useAuth();
   const router = useRouter();
 
@@ -36,28 +37,30 @@ function ProjectWizardPage() {
 
   useEffect(() => {
     async function loadProject() {
-      if (!isLoaded || !userId) return;
+      if (!isLoaded || !userId || !slug) return;
       try {
         const token = await getToken({ template: "supabase" });
         const supabase = createClerkSupabaseClient(token);
 
-        // Fetch project and related data
+        // Fetch project and related data by slug
         const { data: project, error: pError } = await supabase
           .from("projects")
           .select(`
             *,
             spv_details (*),
             project_docs (*),
-            project_media (*)
+            project_media (*),
+            project_milestones (*)
           `)
-          .eq("id", projectId)
-          .single();
+          .eq("slug", slug)
+          .maybeSingle();
 
         if (pError) throw pError;
         if (!project) throw new Error("Project not found");
 
         if (project.status !== "draft") {
-          setError("This project is currently under review and cannot be edited.");
+          setError("This project is currently under review and is in read-only mode.");
+          setCurrentStep(1);
         } else {
           setCurrentStep(project.current_step || 1);
         }
@@ -72,7 +75,7 @@ function ProjectWizardPage() {
     }
 
     loadProject();
-  }, [isLoaded, userId, projectId, getToken]);
+  }, [isLoaded, userId, slug, getToken]);
 
   const handleNext = () => {
     setCurrentStep((s) => Math.min(s + 1, STEPS.length));
@@ -80,6 +83,7 @@ function ProjectWizardPage() {
   const handlePrev = () => setCurrentStep((s) => Math.max(s - 1, 1));
   const jumpToStep = (stepIndex) => setCurrentStep(stepIndex);
   const reloadData = async () => {
+    if (!slug) return;
     setLoading(true);
     try {
       const token = await getToken({ template: "supabase" });
@@ -90,10 +94,11 @@ function ProjectWizardPage() {
           *,
           spv_details (*),
           project_docs (*),
-          project_media (*)
+          project_media (*),
+          project_milestones (*)
         `)
-        .eq("id", projectId)
-        .single();
+        .eq("slug", slug)
+        .maybeSingle();
       setProjectData(project);
     } catch (e) {
       console.error(e);
@@ -181,7 +186,7 @@ function ProjectWizardPage() {
       <div className="bg-white rounded-xl shadow-lg border border-[#064e3b]/10 p-6 sm:p-10">
         {currentStep === 1 && (
           <Step1BasicInfo
-            projectId={projectId}
+            projectId={projectData?.id}
             initialData={projectData}
             onNext={handleNext}
             disabled={projectData?.status !== "draft"}
@@ -190,7 +195,7 @@ function ProjectWizardPage() {
         )}
         {currentStep === 2 && (
           <Step2Structure
-            projectId={projectId}
+            projectId={projectData?.id}
             initialData={projectData}
             onNext={handleNext}
             onPrev={handlePrev}
@@ -200,7 +205,7 @@ function ProjectWizardPage() {
         )}
         {currentStep === 3 && (
           <Step3Financials
-            projectId={projectId}
+            projectId={projectData?.id}
             initialData={projectData}
             onNext={handleNext}
             onPrev={handlePrev}
@@ -210,7 +215,7 @@ function ProjectWizardPage() {
         )}
         {currentStep === 4 && (
           <Step4Documents
-            projectId={projectId}
+            projectId={projectData?.id}
             initialData={projectData}
             onNext={handleNext}
             onPrev={handlePrev}
@@ -220,7 +225,7 @@ function ProjectWizardPage() {
         )}
         {currentStep === 5 && (
           <Step5Media
-            projectId={projectId}
+            projectId={projectData?.id}
             initialData={projectData}
             onNext={handleNext}
             onPrev={handlePrev}
@@ -230,7 +235,7 @@ function ProjectWizardPage() {
         )}
         {currentStep === 6 && (
           <Step6Preview
-            projectId={projectId}
+            projectId={projectData?.id}
             projectData={projectData}
             onPrev={handlePrev}
             jumpToStep={jumpToStep}

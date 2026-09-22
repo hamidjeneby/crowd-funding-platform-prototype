@@ -2,18 +2,54 @@
 
 import { useState } from "react";
 import { submitProjectForReview } from "@/app/actions/projects";
-import { CheckCircle, FileText, Image as ImageIcon, Loader2, AlertCircle } from "lucide-react";
+import { CheckCircle, FileText, Image as ImageIcon, Loader2, AlertCircle, Flag, Calendar } from "lucide-react";
 import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
 import { useUpload } from "@/app/components/wizard/UploadProvider";
 
 const md = new MarkdownIt({ html: true, breaks: true });
 
+function formatUtcDate(dateString) {
+  if (!dateString) return "—";
+  try {
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) return "—";
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const month = months[d.getUTCMonth()];
+    const year = d.getUTCFullYear();
+    const hours = String(d.getUTCHours()).padStart(2, "0");
+    const minutes = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${day} ${month} ${year}, ${hours}:${minutes} UTC`;
+  } catch (e) {
+    return "—";
+  }
+}
+
+function formatUtcDateOnly(dateString) {
+  if (!dateString) return "—";
+  try {
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) return "—";
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const month = months[d.getUTCMonth()];
+    const year = d.getUTCFullYear();
+    return `${day} ${month} ${year}`;
+  } catch (e) {
+    return "—";
+  }
+}
+
 export default function Step6Preview({ projectId, projectData, onPrev, jumpToStep, disabled, onSuccess }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [missing, setMissing] = useState([]);
   const { hasActiveUploads, uploads, uploadingCount, hasFinishedUploads } = useUpload();
+
+  const issuerMilestones = (projectData?.project_milestones || []).filter(
+    (m) => m.milestone_source === "issuer"
+  );
 
   const handleSubmit = async () => {
     if (disabled || hasActiveUploads) return;
@@ -29,7 +65,6 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
         setMissing(res.missingFields);
         setError("The form is incomplete. Please fill out the missing fields in the following sections:");
         
-        // Auto scroll to top where the error is displayed
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (err) {
@@ -42,28 +77,25 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
   const docs = projectData?.project_docs ? [...projectData.project_docs] : [];
   const media = projectData?.project_media ? [...projectData.project_media] : [];
   
-  // Inject uploads from background queue so they show up even if DB hasn't synced
   Object.values(uploads).forEach(u => {
     if (u.projectId === projectId) {
       if (u.category === "document" && !docs.some(d => d.doc_type === u.type)) {
         docs.push({ doc_type: u.type, isUploadTemp: true, uploadStatus: u.status });
-      } else if (u.category === "media" && !media.some(m => m.url === u.fileId)) { // naive check
+      } else if (u.category === "media" && !media.some(m => m.url === u.fileId)) {
         media.push({ isUploadTemp: true, uploadStatus: u.status, isCover: u.isCover, url: u.file ? URL.createObjectURL(u.file) : "" });
       }
     }
   });
 
-  // Helper to map missing fields to sections
   const getSectionForField = (field) => {
     if (["title", "full_description", "summary"].includes(field)) return "Basic Info";
     if (["sharia_contract_type"].includes(field)) return "Structure & Compliance";
-    if (["target_goal", "soft_cap", "hard_cap", "min_investment_floor", "expected_roi_percent", "yield_type", "currency", "clearing_option"].includes(field)) return "Financial Terms";
+    if (["target_goal", "soft_cap", "hard_cap", "min_investment_floor", "expected_roi_percent", "yield_type", "currency", "clearing_option", "campaign_end_date"].includes(field)) return "Financial Terms";
     if (field.includes("doc")) return "Documents";
     if (field === "project_media") return "Media";
     return "Other";
   };
 
-  // Group missing by section
   const missingBySection = missing.reduce((acc, field) => {
     const section = getSectionForField(field);
     if (!acc[section]) acc[section] = [];
@@ -166,6 +198,35 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
                  }}
             />
           </div>
+
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <dt className="text-gray-500 mb-3 font-medium flex items-center gap-2">
+              <Flag className="w-4 h-4 text-[#059669]" />
+              Project Milestones ({issuerMilestones.length})
+            </dt>
+            {issuerMilestones.length > 0 ? (
+              <div className="space-y-3">
+                {issuerMilestones.map((ms, idx) => (
+                  <div key={idx} className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-semibold text-gray-900">{ms.title || "Untitled Milestone"}</span>
+                      {ms.target_date && (
+                        <span className="inline-flex items-center gap-1 text-xs text-gray-500 font-medium shrink-0 bg-white px-2 py-0.5 rounded border border-gray-200">
+                          <Calendar className="w-3 h-3 text-gray-400" />
+                          {formatUtcDateOnly(ms.target_date)}
+                        </span>
+                      )}
+                    </div>
+                    {ms.description && (
+                      <p className="text-xs text-gray-600 mt-1 whitespace-pre-line">{ms.description}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500 italic">No project milestones added.</p>
+            )}
+          </div>
         </div>
 
         {/* Section 2: Structure & Compliance */}
@@ -190,6 +251,12 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
               </dd>
             </div>
             <div>
+              <dt className="text-gray-500">Unit Type</dt>
+              <dd className="font-medium text-gray-900 capitalize">
+                {projectData?.unit_type || (projectData?.sharia_contract_type === "spv_equity" ? "shares" : "sukuk")}
+              </dd>
+            </div>
+            <div>
               <dt className="text-gray-500">Is SPV?</dt>
               <dd className="font-medium text-gray-900">
                 {projectData?.is_spv ? "Yes" : "No"}
@@ -210,36 +277,6 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
                     ({projectData.spv_details[0].registration_number || "—"})
                   </dd>
                 </div>
-                {projectData.spv_details[0].conversion_enabled && (
-                  <>
-                    <div>
-                      <dt className="text-gray-500">Conversion Clause</dt>
-                      <dd className="font-medium text-gray-900">Enabled</dd>
-                    </div>
-                    <div>
-                      <dt className="text-gray-500">Trigger Share Price</dt>
-                      <dd className="font-medium text-gray-900">
-                        {projectData.spv_details[0].conversion_trigger_value != null
-                          ? `$${projectData.spv_details[0].conversion_trigger_value}`
-                          : "—"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-gray-500">Conversion Ratio</dt>
-                      <dd className="font-medium text-gray-900">
-                        {projectData.spv_details[0].conversion_ratio_shares != null
-                          ? `1 Sukuk unit = ${projectData.spv_details[0].conversion_ratio_shares} shares`
-                          : "—"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-gray-500">Conversion Deadline</dt>
-                      <dd className="font-medium text-gray-900">
-                        {projectData.spv_details[0].conversion_deadline || "—"}
-                      </dd>
-                    </div>
-                  </>
-                )}
               </>
             )}
           </dl>
@@ -267,6 +304,14 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
               </dd>
             </div>
             <div>
+              <dt className="text-gray-500">
+                {projectData?.sharia_contract_type === "spv_equity" ? "Share Price" : "Unit Price"}
+              </dt>
+              <dd className="font-medium text-gray-900">
+                {projectData?.unit_price ? `${projectData?.currency ? `${projectData.currency} ` : ""}${projectData.unit_price}` : "—"}
+              </dd>
+            </div>
+            <div>
               <dt className="text-gray-500">Target Goal</dt>
               <dd className="font-medium text-gray-900">
                 {projectData?.target_goal?.toLocaleString() || "—"}
@@ -285,11 +330,19 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
               </dd>
             </div>
             <div>
-              <dt className="text-gray-500">Expected ROI</dt>
+              <dt className="text-gray-500">Campaign Deadline</dt>
               <dd className="font-medium text-gray-900">
-                {projectData?.expected_roi_percent || "—"}%
+                {formatUtcDate(projectData?.campaign_end_date)}
               </dd>
             </div>
+            {projectData?.sharia_contract_type !== "spv_equity" && (
+              <div>
+                <dt className="text-gray-500">Expected ROI</dt>
+                <dd className="font-medium text-gray-900">
+                  {projectData?.expected_roi_percent || "—"}%
+                </dd>
+              </div>
+            )}
             <div>
               <dt className="text-gray-500">Yield Type</dt>
               <dd className="font-medium text-gray-900 capitalize">

@@ -14,6 +14,7 @@ import {
   authorizeUploadBatch,
   deleteProjectFile,
   getSignedUrlsForMedia,
+  updateMediaOrder,
 } from "@/app/actions/upload";
 import { Loader2, RefreshCw } from "lucide-react";
 import { useUpload } from "@/app/components/wizard/UploadProvider";
@@ -191,29 +192,43 @@ export default function Step5Media({
 
     setUploading(true);
     try {
-      // Prepare payload for signed URLs for staged files
+      const mediaOrderUpdates = [];
       const filePayloads = [];
       const localFileMap = {};
+      let nonCoverCounter = 1;
 
       items.forEach((item, idx) => {
+        const isCover = idx === 0;
+        const currentDisplayOrder = isCover ? 0 : nonCoverCounter++;
+
         if (item.isStaged && !item.isUploadingInBg) {
           const ext = item.file.name.split(".").pop();
-          const isCover = idx === 0;
           filePayloads.push({
             tempId: item.media_id,
             category: "media",
             type: item.media_type,
             ext,
             isCover,
-            display_order: idx,
+            display_order: currentDisplayOrder,
             replacesUrl: item.replaces,
           });
           localFileMap[item.media_id] = item.file;
+        } else if (!item.isStaged && !isCover) {
+          mediaOrderUpdates.push({
+            id: item.id,
+            url: item.url,
+            display_order: currentDisplayOrder,
+          });
         }
       });
 
+      // Step A: Sync display order for existing database media items
+      if (mediaOrderUpdates.length > 0) {
+        await updateMediaOrder(projectId, mediaOrderUpdates);
+      }
+
+      // Step B: Authorize and queue uploads for new staged media items
       if (filePayloads.length > 0) {
-        // Step A: Get Signed URLs / Authorized Paths
         const authorizedFiles = await authorizeUploadBatch(
           projectId,
           filePayloads,
@@ -231,7 +246,7 @@ export default function Step5Media({
           }
         }
 
-        // Step B: Queue uploads
+        // Queue uploads
         const uploadConfigs = authorizedFiles.map((authData) => {
           const file = localFileMap[authData.tempId];
           const payload = filePayloads.find(
@@ -248,7 +263,7 @@ export default function Step5Media({
             bucket: authData.bucket,
             path: authData.path,
             isCover: authData.isCover,
-            display_order: authData.display_order,
+            display_order: authData.display_order ?? payload.display_order ?? 0,
             upsert: false,
             signedUrl: authData.signedUrl,
           };
@@ -265,11 +280,6 @@ export default function Step5Media({
           }),
         );
       }
-
-      // Check if we need to sync display order changes for existing files
-      // (This requires an additional server action if they re-ordered existing media)
-      // Since this is out of scope for the upload batch fix, we'll skip DB reorder for now,
-      // but new items are inserted with correct order.
 
       // Save step progress in backend and continue immediately
       await updateProjectDraft(projectId, {}, 5);

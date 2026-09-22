@@ -276,3 +276,89 @@ export async function updateBankDetails(bankDetails) {
 
   return { success: true };
 }
+
+export async function getInvestorHoldingsAndPledges() {
+  const { userId, orgId } = await auth();
+  if (!userId) throw new Error("Unauthorized");
+
+  let investor = null;
+
+  if (orgId) {
+    const { data } = await supabaseAdmin
+      .from("investors")
+      .select("id, investor_class, wallet_balance")
+      .eq("org_id", orgId)
+      .maybeSingle();
+    if (data) investor = data;
+  }
+
+  if (!investor) {
+    const { data } = await supabaseAdmin
+      .from("investors")
+      .select("id, investor_class, wallet_balance")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (data) investor = data;
+  }
+
+  if (!investor) {
+    return { investorClass: null, holdings: [], pledges: [] };
+  }
+
+  const investorId = investor.id;
+  const investorClass = investor.investor_class || 10;
+
+  // Fetch holdings
+  const { data: holdingsData, error: holdingsErr } = await supabaseAdmin
+    .from("holdings")
+    .select(`
+      *,
+      projects (
+        id,
+        title,
+        slug,
+        unit_type,
+        sharia_contract_type,
+        is_spv,
+        unit_price,
+        currency,
+        spv_details (*)
+      )
+    `)
+    .eq("investor_id", investorId)
+    .order("created_at", { ascending: false });
+
+  if (holdingsErr) {
+    console.error("Error fetching holdings:", holdingsErr);
+  }
+
+  // Fetch pledges
+  const { data: pledgesData, error: pledgesErr } = await supabaseAdmin
+    .from("pledges")
+    .select(`
+      *,
+      projects (
+        id,
+        title,
+        slug,
+        unit_type,
+        sharia_contract_type,
+        is_spv,
+        unit_price,
+        currency,
+        spv_details (*)
+      )
+    `)
+    .eq("investor_id", investorId)
+    .order("pledged_at", { ascending: false });
+
+  if (pledgesErr) {
+    console.error("Error fetching pledges:", pledgesErr);
+  }
+
+  return {
+    investorClass,
+    holdings: holdingsData || [],
+    pledges: pledgesData || [],
+  };
+}

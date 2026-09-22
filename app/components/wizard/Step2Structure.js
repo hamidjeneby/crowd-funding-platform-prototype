@@ -9,102 +9,148 @@ import { HelpCircle } from "lucide-react";
 
 const PREDEFINED_AUTHORITIES = ["DIFC", "ADGM", "LABUAN_IBFC"];
 
-const schema = z
-  .object({
-    sharia_contract_type: z.enum(
-      ["murabaha", "mudarabah", "ijara", "spv_equity"],
-      {
-        required_error: "Please select a Sharia contract type",
-      },
-    ),
-    is_spv: z.boolean(),
-    spv_legal_name: z.string().optional(),
-    registration_authority: z.string().optional(),
-    custom_registration_authority: z.string().optional(),
-    registration_number: z.string().optional(),
-    conversion_enabled: z.boolean().optional(),
-    conversion_trigger_value: z
-      .union([
-        z.number(),
-        z.string().transform((v) => (v === "" ? undefined : Number(v))),
-      ])
-      .optional(),
-    conversion_ratio_shares: z
-      .union([
-        z.number(),
-        z.string().transform((v) => (v === "" ? undefined : Number(v))),
-      ])
-      .optional(),
-    conversion_deadline: z.string().optional(),
-  })
-  .superRefine((data, ctx) => {
-    if (data.is_spv) {
-      if (!data.spv_legal_name) {
-        ctx.addIssue({
-          path: ["spv_legal_name"],
-          message: "Required for SPV",
-          code: z.ZodIssueCode.custom,
-        });
-      }
-      if (!data.registration_authority) {
-        ctx.addIssue({
-          path: ["registration_authority"],
-          message: "Required for SPV",
-          code: z.ZodIssueCode.custom,
-        });
-      }
-      if (
-        data.registration_authority === "OTHER" &&
-        (!data.custom_registration_authority ||
-          !data.custom_registration_authority.trim())
-      ) {
-        ctx.addIssue({
-          path: ["custom_registration_authority"],
-          message: "Please specify the registration authority name",
-          code: z.ZodIssueCode.custom,
-        });
-      }
-      if (!data.registration_number) {
-        ctx.addIssue({
-          path: ["registration_number"],
-          message: "Required for SPV",
-          code: z.ZodIssueCode.custom,
-        });
-      }
+const createSchema = (campaignEndDate) =>
+  z
+    .object({
+      sharia_contract_type: z.enum(
+        ["murabaha", "mudarabah", "ijara", "spv_equity"],
+        {
+          required_error: "Please select a Sharia contract type",
+        },
+      ),
+      is_spv: z.boolean(),
+      spv_legal_name: z.string().optional(),
+      registration_authority: z.string().optional(),
+      custom_registration_authority: z.string().optional(),
+      registration_number: z.string().optional(),
+      total_shares_authorized: z
+        .union([
+          z.number(),
+          z.string().transform((v) => (v === "" ? undefined : Number(v))),
+        ])
+        .optional(),
+      conversion_enabled: z.boolean().optional(),
+      conversion_trigger_value: z
+        .union([
+          z.number(),
+          z.string().transform((v) => (v === "" ? undefined : Number(v))),
+        ])
+        .optional(),
+      conversion_ratio_shares: z
+        .union([
+          z.number(),
+          z.string().transform((v) => (v === "" ? undefined : Number(v))),
+        ])
+        .optional(),
+      conversion_deadline: z.string().optional(),
+    })
+    .superRefine((data, ctx) => {
+      if (data.is_spv) {
+        if (!data.spv_legal_name) {
+          ctx.addIssue({
+            path: ["spv_legal_name"],
+            message: "Required for SPV",
+            code: z.ZodIssueCode.custom,
+          });
+        }
+        if (!data.registration_authority) {
+          ctx.addIssue({
+            path: ["registration_authority"],
+            message: "Required for SPV",
+            code: z.ZodIssueCode.custom,
+          });
+        }
+        if (
+          data.registration_authority === "OTHER" &&
+          (!data.custom_registration_authority ||
+            !data.custom_registration_authority.trim())
+        ) {
+          ctx.addIssue({
+            path: ["custom_registration_authority"],
+            message: "Please specify the registration authority name",
+            code: z.ZodIssueCode.custom,
+          });
+        }
+        if (!data.registration_number) {
+          ctx.addIssue({
+            path: ["registration_number"],
+            message: "Required for SPV",
+            code: z.ZodIssueCode.custom,
+          });
+        }
 
-      if (data.sharia_contract_type !== "spv_equity" && data.conversion_enabled) {
-        if (
-          data.conversion_trigger_value === undefined ||
-          isNaN(data.conversion_trigger_value) ||
-          data.conversion_trigger_value <= 0
-        ) {
-          ctx.addIssue({
-            path: ["conversion_trigger_value"],
-            message: "Valid trigger share price required",
-            code: z.ZodIssueCode.custom,
-          });
+        if (data.sharia_contract_type === "spv_equity") {
+          if (
+            data.total_shares_authorized === undefined ||
+            isNaN(data.total_shares_authorized) ||
+            data.total_shares_authorized <= 0
+          ) {
+            ctx.addIssue({
+              path: ["total_shares_authorized"],
+              message: "Total authorized shares required and must be greater than 0",
+              code: z.ZodIssueCode.custom,
+            });
+          }
         }
-        if (
-          data.conversion_ratio_shares === undefined ||
-          isNaN(data.conversion_ratio_shares) ||
-          data.conversion_ratio_shares <= 0
-        ) {
-          ctx.addIssue({
-            path: ["conversion_ratio_shares"],
-            message: "Valid conversion ratio required",
-            code: z.ZodIssueCode.custom,
-          });
-        }
-        if (!data.conversion_deadline) {
-          ctx.addIssue({
-            path: ["conversion_deadline"],
-            message: "Conversion deadline date required",
-            code: z.ZodIssueCode.custom,
-          });
+
+        if (data.sharia_contract_type !== "spv_equity" && data.conversion_enabled) {
+          if (
+            data.total_shares_authorized === undefined ||
+            isNaN(data.total_shares_authorized) ||
+            data.total_shares_authorized <= 0
+          ) {
+            ctx.addIssue({
+              path: ["total_shares_authorized"],
+              message: "Total authorized shares required for conversion clause",
+              code: z.ZodIssueCode.custom,
+            });
+          }
+          if (
+            data.conversion_trigger_value === undefined ||
+            isNaN(data.conversion_trigger_value) ||
+            data.conversion_trigger_value <= 0
+          ) {
+            ctx.addIssue({
+              path: ["conversion_trigger_value"],
+              message: "Valid trigger share price required",
+              code: z.ZodIssueCode.custom,
+            });
+          }
+          if (
+            data.conversion_ratio_shares === undefined ||
+            isNaN(data.conversion_ratio_shares) ||
+            data.conversion_ratio_shares <= 0
+          ) {
+            ctx.addIssue({
+              path: ["conversion_ratio_shares"],
+              message: "Valid conversion ratio required",
+              code: z.ZodIssueCode.custom,
+            });
+          }
+          if (!data.conversion_deadline) {
+            ctx.addIssue({
+              path: ["conversion_deadline"],
+              message: "Conversion deadline date required",
+              code: z.ZodIssueCode.custom,
+            });
+          } else if (campaignEndDate && data.conversion_deadline) {
+            const convDateStr = data.conversion_deadline.endsWith("Z") ? data.conversion_deadline : `${data.conversion_deadline}T00:00:00.000Z`;
+            const campaignDateStr = campaignEndDate.endsWith("Z") ? campaignEndDate : `${campaignEndDate}:00.000Z`;
+            const convDate = new Date(convDateStr);
+            const campaignDate = new Date(campaignDateStr);
+            if (!isNaN(convDate.getTime()) && !isNaN(campaignDate.getTime())) {
+              if (convDate <= campaignDate) {
+                ctx.addIssue({
+                  path: ["conversion_deadline"],
+                  message: "The conversion deadline must be after the campaign end date. Please choose a conversion deadline after the campaign end date.",
+                  code: z.ZodIssueCode.custom,
+                });
+              }
+            }
+          }
         }
       }
-    }
-  });
+    });
 
 export default function Step2Structure({
   projectId,
@@ -117,13 +163,19 @@ export default function Step2Structure({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const spvDetail = initialData?.spv_details?.[0] || {};
+  const spvDetail = initialData?.spv_details?.[0] || initialData?.spv_details || {};
   const savedAuthority = spvDetail?.registration_authority || "";
   const isPredefinedAuth = PREDEFINED_AUTHORITIES.includes(savedAuthority);
 
   const initialContractType = initialData?.sharia_contract_type || undefined;
   const initialIsSpv =
     initialContractType === "spv_equity" ? true : initialData?.is_spv || false;
+  const campaignEndDate = initialData?.campaign_end_date;
+
+  const schema = useMemo(
+    () => createSchema(campaignEndDate),
+    [campaignEndDate]
+  );
 
   const {
     register,
@@ -133,6 +185,7 @@ export default function Step2Structure({
     formState: { errors },
   } = useForm({
     resolver: zodResolver(schema),
+
     defaultValues: {
       sharia_contract_type: initialContractType,
       is_spv: initialIsSpv,
@@ -144,6 +197,7 @@ export default function Step2Structure({
         : undefined,
       custom_registration_authority: isPredefinedAuth ? "" : savedAuthority,
       registration_number: spvDetail?.registration_number || "",
+      total_shares_authorized: spvDetail?.total_shares_authorized ?? "",
       conversion_enabled:
         initialContractType === "spv_equity"
           ? false
@@ -336,6 +390,30 @@ export default function Step2Structure({
             )}
           </div>
 
+          {shariaContractType === "spv_equity" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                Total Authorized Shares <span className="text-red-500">*</span>
+              </label>
+              <p className="text-xs text-gray-500 mb-1">
+                (Maximum number of shares that can be distributed)
+              </p>
+              <input
+                type="number"
+                step="1"
+                placeholder="e.g. 100000"
+                {...register("total_shares_authorized")}
+                disabled={disabled}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
+              />
+              {errors.total_shares_authorized && (
+                <p className="mt-1 text-sm text-red-600">
+                  {errors.total_shares_authorized.message}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Conversion Clause Checkbox (Only available if SPV is checked AND contract type is NOT SPV Equity) */}
           {shariaContractType !== "spv_equity" && (
             <div className="pt-2 border-t border-gray-200">
@@ -376,6 +454,28 @@ export default function Step2Structure({
 
               <div>
                 <label className="block text-sm font-medium text-gray-700">
+                  Total Authorized Shares <span className="text-red-500">*</span>
+                </label>
+                <p className="text-xs text-gray-500 mb-1">
+                  (Maximum number of shares that can be distributed upon conversion)
+                </p>
+                <input
+                  type="number"
+                  step="1"
+                  placeholder="e.g. 100000"
+                  {...register("total_shares_authorized")}
+                  disabled={disabled}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
+                />
+                {errors.total_shares_authorized && (
+                  <p className="mt-1 text-sm text-red-600">
+                    {errors.total_shares_authorized.message}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
                   Trigger Share Price
                 </label>
                 <p className="text-xs text-gray-500 mb-1">
@@ -397,13 +497,10 @@ export default function Step2Structure({
               </div>
 
               <div>
-                <div className="flex flex-wrap items-center justify-between gap-1 mb-1">
+                <div className="mb-1">
                   <label className="block text-sm font-medium text-gray-700">
                     1 sukuk unit converts to
                   </label>
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-xs">
-                    1 Sukuk unit = AED 100
-                  </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <input

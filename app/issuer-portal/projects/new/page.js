@@ -19,8 +19,8 @@ export default function NewProjectPage() {
     setLoading(true);
     setError(null);
     try {
-      const projectId = await createProjectDraft(title);
-      router.push(`/issuer-portal/projects/${projectId}/edit`);
+      const projectResult = await createProjectDraft(title);
+      router.push(`/issuer-portal/projects/${projectResult.slug}/edit`);
     } catch (err) {
       setError(err.message || "Failed to create project");
       setLoading(false);
