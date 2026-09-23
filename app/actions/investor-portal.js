@@ -308,31 +308,7 @@ export async function getInvestorHoldingsAndPledges() {
   const investorId = investor.id;
   const investorClass = investor.investor_class || 10;
 
-  // Fetch holdings
-  const { data: holdingsData, error: holdingsErr } = await supabaseAdmin
-    .from("holdings")
-    .select(`
-      *,
-      projects (
-        id,
-        title,
-        slug,
-        unit_type,
-        sharia_contract_type,
-        is_spv,
-        unit_price,
-        currency,
-        spv_details (*)
-      )
-    `)
-    .eq("investor_id", investorId)
-    .order("created_at", { ascending: false });
-
-  if (holdingsErr) {
-    console.error("Error fetching holdings:", holdingsErr);
-  }
-
-  // Fetch pledges
+  // Fetch all pledge rows for investor from pledges table
   const { data: pledgesData, error: pledgesErr } = await supabaseAdmin
     .from("pledges")
     .select(`
@@ -346,6 +322,7 @@ export async function getInvestorHoldingsAndPledges() {
         is_spv,
         unit_price,
         currency,
+        expected_roi_percent,
         spv_details (*)
       )
     `)
@@ -356,9 +333,25 @@ export async function getInvestorHoldingsAndPledges() {
     console.error("Error fetching pledges:", pledgesErr);
   }
 
+  const allPledges = pledgesData || [];
+
+  // Separate pledges vs holdings according to status field:
+  // - status === "pending": Active pledge
+  // - status in ["allocated", "active", "completed"]: Portfolio holding (uses allocated_amount)
+  // - status in ["cancelled", "refunded"]: Excluded entirely
+  const pledges = allPledges.filter(
+    (p) => p.status && p.status.toLowerCase() === "pending"
+  );
+
+  const holdings = allPledges.filter(
+    (p) =>
+      p.status &&
+      ["allocated", "active", "completed"].includes(p.status.toLowerCase())
+  );
+
   return {
     investorClass,
-    holdings: holdingsData || [],
-    pledges: pledgesData || [],
+    holdings,
+    pledges,
   };
 }

@@ -158,12 +158,14 @@ CREATE TABLE pledges (
   allocated_amount NUMERIC,
   investor_class_at_pledge INT NOT NULL, -- The class at the time of pledge
   fee_percent_at_pledge NUMERIC NOT NULL, -- The fee at the time of pledge
-  fee_amount NUMERIC NOT NULL, -- The fee amount at the time of pledge |-------These three (investor_class_at_pledge, fee_percent_at_pledge, fee_amount) are frozen snapshots so that in case an investor changes their class, the investor will still get what they contractually agreed on at the time of pledge
+  fee_amount NUMERIC NOT NULL, -- The fee amount at the time of pledge |-------These three (investor_class_at_pledge, fee_percent_at_pledge, fee_amount) are frozen snapshots
   status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'confirmed', 'allocated', 'cancelled'
   pledged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   allocated_at TIMESTAMPTZ,
   payment_status TEXT NOT NULL DEFAULT 'completed', -- 'pending', 'completed', 'refunded'
-  pledged_units NUMERIC NOT NULL -- Math.floor(pledged_amount / unit_price) --The number of units the investor pledged for e.g if unit price is 500 and investor pledged 5000 they get 10 units
+  pledged_units NUMERIC NOT NULL, -- Math.floor(pledged_amount / unit_price)
+  conversion_eligible_units NUMERIC DEFAULT 0, -- Sukuk units eligible for equity conversion calculated at pledge time
+  redeemed_at TIMESTAMPTZ -- Timestamp when pledge maturity/redemption is settled
 );
 ```
 
@@ -278,20 +280,28 @@ The marketplace queries `getVisibleProjects(investorClass)` in [app/actions/mark
 ### 4.4 Project Card Data & Calculations
 Each project card in the marketplace grid renders:
 1. **Cover Image**: `cover_image_url` or default gradient fallback.
-2. **Sharia Contract Tag**: Badged by contract type (e.g., `MUDARABAH`, `SPV EQUITY`).
+2. **Top Badges**:
+   - Status Tag: `Pre-Audit / Unreviewed` (Class 1) or `Live Campaign`.
+   - **Conversion Available Badge**: Displayed if `is_conversion_enabled = true` and `sharia_contract_type != 'spv_equity'`.
+   - Sharia Contract Tag: Badged by contract type (e.g., `MUDARABAH`, `SPV EQUITY`).
 3. **Title & Summary**: Project title and 2-line truncated summary.
 4. **Live Funding Progress**:
    - Total Pledged Amount = `SUM(pledges.pledged_amount)` for this project where `status != 'cancelled'`.
    - Target Goal = `projects.target_goal`.
    - Funding Percentage = `((total_pledged / target_goal) * 100).toFixed(1)` (e.g., `18.2%`).
    - Funding Progress Bar: Visual bar capped at 100%.
-5. **Campaign Deadline Badge**:
+5. **Conversion Pool Percentage Bar (Classes 1–4 Only)**:
+   - Visible **ONLY** to Class 1, 2, 3, and 4 investors when conversion is enabled. **Hidden for Classes 5–10.**
+   - Total Convertible Units = `floor(total_shares_authorized / conversion_ratio_shares)`.
+   - Pledged Converted Units = `SUM(pledges.conversion_eligible_units)` for this project.
+   - Conversion Percentage = `((pledged_converted_units / total_convertible_units) * 100).toFixed(1)`.
+6. **Campaign Deadline Badge**:
    - Formatted in UTC: `formatUtcDate(campaign_end_date)` -> e.g. `31 Dec 2027, 21:00 UTC`.
-6. **Key Metrics**:
+7. **Key Metrics**:
    - Min Floor: `currency min_investment_floor` (e.g. `AED 1,000`).
    - Unit Price: `currency unit_price` (e.g. `AED 250 / sukuk`).
    - Expected ROI: `${expected_roi_percent}% ROI` (hidden for `spv_equity`).
-7. **Action Button**: "View Project Details" -> routes to `/investor-portal/projects/${slug}`.
+8. **Action Button**: "View Project Details" -> routes to `/investor-portal/projects/${slug}`.
 
 ---
 
@@ -301,10 +311,10 @@ The Individual Project page presents deep due-diligence data and the interactive
 
 ### 5.1 Hero Banner & Overview Section
 - **Title & Issuer Name**: Official project title and issuing entity legal name.
-- **Contract & Compliance Badges**: Sharia contract type, Sharia compliance status (`pending` / `verified`), SPV structure badge.
+- **Contract & Compliance Badges**: Sharia contract type, Sharia compliance status (`pending` / `verified`), `Conversion Available` badge (if applicable), SPV structure badge.
 - **Cover Image & Primary Action**: Large hero visual.
 
-### 5.2 Detailed Content Tabs
+### 5.2 Detailed Content Sections
 1. **Overview**:
    - Rendered HTML full description (`full_description`) sanitized via DOMPurify.
    - Highlights the core problem, solution, revenue model, and market impact.
@@ -316,13 +326,17 @@ The Individual Project page presents deep due-diligence data and the interactive
    - Secure links to project documents (`pitch_deck`, `balance_sheet`, `valuation_report`, `cap_table`, `spv_registration`).
 4. **Media Gallery**:
    - Grid gallery of supplementary images from `project_media` with interactive modal viewer.
-5. **SPV & Conversion Clause Details**:
-   - Legal entity name, registration authority, registration number.
-   - Conversion Clause breakdown:
-     - Trigger Share Price (`conversion_trigger_value`).
+5. **SPV & Legal Entity Details**:
+   - Legal entity name, registration authority, registration number, Sharia compliance certificate link.
+6. **Dedicated Equity Conversion Privileges & Terms Card (Classes 1–4 Only)**:
+   - Visible **ONLY** to Class 1–4 investors when project has conversion enabled.
+   - Displays:
+     - Conversion Trigger Share Price (`conversion_trigger_price`).
      - Conversion Ratio (`1 Sukuk unit = X shares`).
-     - Conversion Deadline (`conversion_deadline` in UTC).
-     - Investor Class Conversion Rights & Cap (evaluated via [conversion.js](file:///Users/marchakimmwai/Desktop/unoffical-projects/crowd-funding-platform-prototype/app/utils/conversion.js)).
+     - Conversion Cutoff / Deadline formatted in **UTC** (`conversion_deadline`).
+     - Investor Class Conversion Value Cap (Class 1: Unlimited, Class 2: AED 1M, Class 3: AED 500k, Class 4: AED 250k).
+     - Conversion Pool Capacity Progress Bar & Remaining Pool Units.
+     - Conversion Clauses & Governing Legal Terms (`conversion_clauses`).
 
 ---
 

@@ -83,6 +83,33 @@ export async function getLiveRaisedAmounts(projectIds) {
   return totals;
 }
 
+/**
+ * Live computes total conversion_eligible_units for project IDs directly from pledges table
+ */
+export async function getLiveConversionTotals(projectIds) {
+  if (!projectIds || projectIds.length === 0) return {};
+
+  const { data, error } = await supabaseAdmin
+    .from("pledges")
+    .select("project_id, conversion_eligible_units, status")
+    .in("project_id", projectIds);
+
+  if (error || !data) {
+    console.error("Error fetching conversion totals:", error);
+    return {};
+  }
+
+  const totals = {};
+  data.forEach((p) => {
+    if (p.status !== "cancelled" && p.status !== "refunded") {
+      const pid = p.project_id;
+      const units = Number(p.conversion_eligible_units) || 0;
+      totals[pid] = (totals[pid] || 0) + units;
+    }
+  });
+
+  return totals;
+}
 
 /**
  * Single backend query function for marketplace visible projects
@@ -90,7 +117,10 @@ export async function getLiveRaisedAmounts(projectIds) {
 export async function getVisibleProjectsQuery(investorClassRaw) {
   const classNum = typeof investorClassRaw === "number" ? investorClassRaw : (parseInt(String(investorClassRaw || "").replace(/\D/g, ""), 10) || 10);
 
-  let query = supabaseAdmin.from("projects").select("*");
+  let query = supabaseAdmin.from("projects").select(`
+    *,
+    spv_details (*)
+  `);
 
   if (classNum === 1) {
     query = query.in("status", ["campaign_live", "pending_review"]);
@@ -114,7 +144,10 @@ export async function getVisibleProjectsQuery(investorClassRaw) {
   if (filteredProjects.length === 0) return [];
 
   const projectIds = filteredProjects.map((p) => p.id);
-  const raisedTotals = await getLiveRaisedAmounts(projectIds);
+  const [raisedTotals, conversionTotals] = await Promise.all([
+    getLiveRaisedAmounts(projectIds),
+    getLiveConversionTotals(projectIds),
+  ]);
 
   const projectsWithResolvedUrls = await Promise.all(
     filteredProjects.map(async (p) => {
@@ -130,10 +163,20 @@ export async function getVisibleProjectsQuery(investorClassRaw) {
           }
         }
       }
+
+      let spvDetails = null;
+      if (Array.isArray(p.spv_details) && p.spv_details.length > 0) {
+        spvDetails = p.spv_details[0];
+      } else if (p.spv_details && typeof p.spv_details === "object") {
+        spvDetails = p.spv_details;
+      }
+
       return {
         ...p,
+        spv_details: spvDetails,
         cover_image_url: coverUrl,
         live_raised_amount: raisedTotals[p.id] || 0,
+        live_conversion_units: conversionTotals[p.id] || 0,
       };
     })
   );
@@ -191,7 +234,7 @@ export async function getProjectDetailBySlug(slug, investorClassRaw) {
   }
 
   // 5. Fetch related media, docs (filtered), and milestones
-  const [mediaRes, docsRes, milestonesRes, raisedTotals] = await Promise.all([
+  const [mediaRes, docsRes, milestonesRes, raisedTotals, conversionTotals] = await Promise.all([
     supabaseAdmin
       .from("project_media")
       .select("*")
@@ -208,6 +251,7 @@ export async function getProjectDetailBySlug(slug, investorClassRaw) {
       .eq("project_id", project.id)
       .order("target_date", { ascending: true }),
     getLiveRaisedAmounts([project.id]),
+    getLiveConversionTotals([project.id]),
   ]);
 
   const rawDocs = docsRes.data || [];
@@ -302,6 +346,7 @@ export async function getProjectDetailBySlug(slug, investorClassRaw) {
     spv_details: spvDetails,
     cover_image_url: resolvedCoverUrl,
     live_raised_amount: raisedTotals[project.id] || 0,
+    live_conversion_units: conversionTotals[project.id] || 0,
     project_media: mediaWithUrls,
     project_docs: docsWithSignedUrls,
     shariah_certificate_doc: shariahCertDoc,

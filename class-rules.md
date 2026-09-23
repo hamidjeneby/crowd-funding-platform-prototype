@@ -82,11 +82,22 @@ commercial/cosmetic feature, but carries no access-control meaning today.
   - Class 3 — capped at AED 500,000 conversion value
   - Class 4 — capped at AED 250,000 conversion value
 - **The trigger price, conversion ratio, and deadline are proposed by the issuer but finalized by compliance/Sharia review** before the campaign goes live — never accepted as raw, unreviewed issuer input, since these terms directly affect fairness and Sharia compliance. Once a campaign is live and investors have pledged against the published terms, they're locked.
-- **Shared conversion pool:** `total_shares_authorized` on `spv_details` sets a hard ceiling on total shares the project can ever hand out via conversion. Because Class 1–4 investors are competing for a shared, finite pool (their individual per-class caps don't guarantee pool availability), each investor's actual `conversion_eligible_units` is computed as:
-  ```
-  MIN(per-class cap for this investor, remaining pool capacity at time of allocation)
-  ```
-  This is effectively first-come-first-served among conversion-eligible pledges — an investor's Sukuk itself is always valid regardless of pool depletion, but their conversion upside may be partial if the pool runs low by the time they're allocated.
+- **Shared conversion pool & Live Pledge Allocation:** `total_shares_authorized` on `spv_details` sets a hard ceiling on total shares the project can ever hand out via conversion. Each pledge's `conversion_eligible_units` is calculated live at pledge time and recorded on the `pledges` table according to the exact algorithm:
+  1. **Eligibility Check:** Must not be `spv_equity`, must have `conversion_enabled = true` on `spv_details`, and investor must be Class 1–4. If Class 5–10, `conversion_eligible_units = 0`.
+  2. **Remaining Share Pool Capacity:**
+     $$\text{remaining\_shares\_capacity} = \text{total\_shares\_authorized} - \left( \text{conversion\_ratio\_shares} \times \sum_{\text{pledges for project}} \text{conversion\_eligible\_units} \right)$$
+     If $\text{remaining\_shares\_capacity} \le 0$, then `conversion_eligible_units = 0`.
+  3. **Class Conversion Value Cap:**
+     - Class 1: Unlimited
+     - Class 2: AED 1,000,000
+     - Class 3: AED 500,000
+     - Class 4: AED 250,000
+  4. **Effective Conversion Amount:** $\min(\text{pledged\_amount}, \text{class\_conversion\_cap})$.
+  5. **Raw Calculated Conversion Shares:**
+     $$\text{raw\_calculated\_shares} = \left\lfloor \frac{\text{effective\_amount}}{\text{unit\_price}} \right\rfloor \times \text{conversion\_ratio\_shares}$$
+  6. **Final Convertible Units (Sukuk Units):**
+     $$\text{assigned\_shares} = \min(\text{raw\_calculated\_shares}, \text{remaining\_shares\_capacity})$$
+     $$\text{conversion\_eligible\_units} = \left\lfloor \frac{\text{assigned\_shares}}{\text{conversion\_ratio\_shares}} \right\rfloor$$
 - **`hard_cap` relationship to shares differs by contract type:**
   - **SPV Equity:** `hard_cap` ≤ `total_shares_authorized × unit_price` (and `target_goal` is auto-calculated from the same formula) — every AED raised directly buys a share, so there's no room for oversell.
   - **Conversion-enabled non-equity Sukuk:** `hard_cap` is *not* bounded by the share pool in the same direct way, because Classes 5–10 money never touches the conversion pool at all — only Class 1–4 pledges compete for it, so the total raise can exceed what the reserved shares could back in the worst case, without over-promising, since most classes have zero conversion rights to begin with.
@@ -137,8 +148,8 @@ commercial/cosmetic feature, but carries no access-control meaning today.
 | `investor_class` | `investor_profiles` | Current class, reviewer-assigned |
 | `investor_class_at_pledge` | `pledges` | Frozen snapshot at time of pledge |
 | `fee_percent_at_pledge` | `pledges` | Frozen fee rate at time of pledge |
-| `conversion_eligible_units` | `holdings` | Actual convertible portion, capped by class + pool |
+| `conversion_eligible_units` | `pledges` | Actual convertible portion (in Sukuk units), calculated at pledge time |
+| `redeemed_at` | `pledges` | Timestamp when pledge maturity/redemption is settled; feeds upgrade eligibility |
 | `total_shares_authorized` | `spv_details` | Ceiling on all shares a project can ever issue/convert |
 | `underwriter_mode_enabled` | `projects` / `financial_terms` | Issuer's paid opt-in for underwriting |
 | `min_investment_floor` | `projects` | Project-level minimum pledge, independent of class |
-| `redeemed_at` | `holdings` | Feeds the 3-redemption upgrade eligibility count |

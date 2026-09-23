@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -87,13 +87,17 @@ const createSchema = (campaignEndDate) =>
           ) {
             ctx.addIssue({
               path: ["total_shares_authorized"],
-              message: "Total authorized shares required and must be greater than 0",
+              message:
+                "Total authorized shares required and must be greater than 0",
               code: z.ZodIssueCode.custom,
             });
           }
         }
 
-        if (data.sharia_contract_type !== "spv_equity" && data.conversion_enabled) {
+        if (
+          data.sharia_contract_type !== "spv_equity" &&
+          data.conversion_enabled
+        ) {
           if (
             data.total_shares_authorized === undefined ||
             isNaN(data.total_shares_authorized) ||
@@ -134,15 +138,20 @@ const createSchema = (campaignEndDate) =>
               code: z.ZodIssueCode.custom,
             });
           } else if (campaignEndDate && data.conversion_deadline) {
-            const convDateStr = data.conversion_deadline.endsWith("Z") ? data.conversion_deadline : `${data.conversion_deadline}T00:00:00.000Z`;
-            const campaignDateStr = campaignEndDate.endsWith("Z") ? campaignEndDate : `${campaignEndDate}:00.000Z`;
+            const convDateStr = data.conversion_deadline.endsWith("Z")
+              ? data.conversion_deadline
+              : `${data.conversion_deadline}T00:00:00.000Z`;
+            const campaignDateStr = campaignEndDate.endsWith("Z")
+              ? campaignEndDate
+              : `${campaignEndDate}:00.000Z`;
             const convDate = new Date(convDateStr);
             const campaignDate = new Date(campaignDateStr);
             if (!isNaN(convDate.getTime()) && !isNaN(campaignDate.getTime())) {
               if (convDate <= campaignDate) {
                 ctx.addIssue({
                   path: ["conversion_deadline"],
-                  message: "The conversion deadline must be after the campaign end date. Please choose a conversion deadline after the campaign end date.",
+                  message:
+                    "The conversion deadline must be after the campaign end date. Please choose a conversion deadline after the campaign end date.",
                   code: z.ZodIssueCode.custom,
                 });
               }
@@ -163,7 +172,8 @@ export default function Step2Structure({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const spvDetail = initialData?.spv_details?.[0] || initialData?.spv_details || {};
+  const spvDetail =
+    initialData?.spv_details?.[0] || initialData?.spv_details || {};
   const savedAuthority = spvDetail?.registration_authority || "";
   const isPredefinedAuth = PREDEFINED_AUTHORITIES.includes(savedAuthority);
 
@@ -174,7 +184,7 @@ export default function Step2Structure({
 
   const schema = useMemo(
     () => createSchema(campaignEndDate),
-    [campaignEndDate]
+    [campaignEndDate],
   );
 
   const {
@@ -433,10 +443,10 @@ export default function Step2Structure({
                   <span className="relative inline-block group ml-1.5 align-middle">
                     <HelpCircle className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-pointer" />
                     <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-72 p-2.5 bg-gray-900 text-white text-xs rounded-lg shadow-lg z-30 leading-relaxed font-normal">
-                      A conversion clause specifies the conditions under which an
-                      investment automatically transforms into equity shares in
-                      the company. Enabling this clause will make your project
-                      more attractive to investors
+                      A conversion clause specifies the conditions under which
+                      an investment automatically transforms into equity shares
+                      in the company. Enabling this clause will make your
+                      project more attractive to investors
                       <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></span>
                     </span>
                   </span>
@@ -454,10 +464,12 @@ export default function Step2Structure({
 
               <div>
                 <label className="block text-sm font-medium text-gray-700">
-                  Total Authorized Shares <span className="text-red-500">*</span>
+                  Total Authorized Shares{" "}
+                  <span className="text-red-500">*</span>
                 </label>
                 <p className="text-xs text-gray-500 mb-1">
-                  (Maximum number of shares that can be distributed upon conversion)
+                  (Maximum number of shares that can be distributed upon
+                  conversion)
                 </p>
                 <input
                   type="number"

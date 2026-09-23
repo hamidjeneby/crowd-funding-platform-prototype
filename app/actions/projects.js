@@ -20,16 +20,29 @@ async function getIssuerByOrgId(orgId) {
 
 /**
  * Helper function to parse user date inputs directly as UTC without converting local timezone offset.
+ * Handles datetime-local strings, ISO strings, Postgres TIMESTAMPTZ strings, and YYYY-MM-DD date strings.
  */
 function parseAsUtcIso(dateStr) {
   if (!dateStr) return null;
+
   if (typeof dateStr === "string") {
     let s = dateStr.trim();
     if (!s) return null;
-    if (s.endsWith("Z")) {
-      return new Date(s).toISOString();
+
+    // Handle postgres timestamptz like "2027-12-31 21:00:00+00" or "2027-12-31 21:00:00"
+    if (s.includes(" ") && !s.includes("T")) {
+      s = s.replace(" ", "T");
     }
-    // Handles datetime-local format "YYYY-MM-DDTHH:mm" or "YYYY-MM-DDTHH:mm:ss"
+
+    // Try parsing standard ISO/Date string if it ends with Z or has offset (+00 / +00:00)
+    if (s.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(s) || /[+-]\d{2}$/.test(s)) {
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        return d.toISOString();
+      }
+    }
+
+    // Handle "T" datetime strings without explicit offset (assume UTC)
     if (s.includes("T")) {
       const parts = s.split("T");
       const timeParts = parts[1].split(":");
@@ -37,13 +50,35 @@ function parseAsUtcIso(dateStr) {
       if (timeParts.length === 2) {
         timeStr += ":00";
       }
-      return `${parts[0]}T${timeStr}.000Z`;
-    } else {
-      // Handles date format "YYYY-MM-DD"
+      if (!timeStr.endsWith("Z") && !/[+-]\d{2}/.test(timeStr)) {
+        timeStr += ".000Z";
+      }
+      const iso = `${parts[0]}T${timeStr}`;
+      const d = new Date(iso);
+      if (!isNaN(d.getTime())) {
+        return d.toISOString();
+      }
+    }
+
+    // Handle YYYY-MM-DD date strings
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
       return `${s}T00:00:00.000Z`;
     }
+
+    // Fallback: native Date parsing
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString();
+    }
+
+    return null;
   }
-  return new Date(dateStr).toISOString();
+
+  if (dateStr instanceof Date) {
+    return isNaN(dateStr.getTime()) ? null : dateStr.toISOString();
+  }
+
+  return null;
 }
 
 /**
@@ -89,9 +124,11 @@ export async function ensureSystemMilestonesExist(projectId, campaignEndDate = n
     let custodyDate = null;
     if (campaignEndDate) {
       const utcIso = parseAsUtcIso(campaignEndDate);
-      const dt = new Date(utcIso);
-      dt.setUTCDate(dt.getUTCDate() + 5);
-      custodyDate = dt.toISOString();
+      if (utcIso) {
+        const dt = new Date(utcIso);
+        dt.setUTCDate(dt.getUTCDate() + 5);
+        custodyDate = dt.toISOString();
+      }
     }
     systemMilestonesToCreate.push({
       project_id: projectId,
@@ -112,19 +149,21 @@ export async function ensureSystemMilestonesExist(projectId, campaignEndDate = n
   // Update target dates for existing system milestones if campaignEndDate is set
   if (campaignEndDate) {
     const formattedEnd = parseAsUtcIso(campaignEndDate);
-    const custodyDate = new Date(new Date(formattedEnd).getTime() + 5 * 24 * 60 * 60 * 1000).toISOString();
+    if (formattedEnd) {
+      const custodyDate = new Date(new Date(formattedEnd).getTime() + 5 * 24 * 60 * 60 * 1000).toISOString();
 
-    await supabaseAdmin
-      .from("project_milestones")
-      .update({ target_date: formattedEnd })
-      .eq("project_id", projectId)
-      .eq("linked_system_event", "campaign_funded");
+      await supabaseAdmin
+        .from("project_milestones")
+        .update({ target_date: formattedEnd })
+        .eq("project_id", projectId)
+        .eq("linked_system_event", "campaign_funded");
 
-    await supabaseAdmin
-      .from("project_milestones")
-      .update({ target_date: custodyDate })
-      .eq("project_id", projectId)
-      .eq("linked_system_event", "custody_transfer_complete");
+      await supabaseAdmin
+        .from("project_milestones")
+        .update({ target_date: custodyDate })
+        .eq("project_id", projectId)
+        .eq("linked_system_event", "custody_transfer_complete");
+    }
   }
 }
 

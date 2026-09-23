@@ -158,7 +158,9 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
             <div className="space-y-4">
               {pledges.map((pledge) => {
                 const project = pledge.projects || {};
-                const conversionRights = getConversionRights(investorClass, project);
+                const pledgeClass = pledge.investor_class_at_pledge || investorClass;
+                const pledgeFeePercent = pledge.fee_percent_at_pledge != null ? pledge.fee_percent_at_pledge : 0;
+                const conversionRights = getConversionRights(pledgeClass, project);
                 const currency = project.currency || "USD";
                 const amount = Number(pledge.pledged_amount || 0);
                 const fee = Number(pledge.fee_amount || 0);
@@ -171,9 +173,12 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                     {/* Top row */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4 border-gray-100">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded border border-emerald-200">
                             {project.sharia_contract_type ? project.sharia_contract_type.replace("_", " ") : "Sukuk"}
+                          </span>
+                          <span className="text-xs font-bold bg-[#064e3b] text-white px-2.5 py-0.5 rounded">
+                            Class {pledgeClass} at Pledge
                           </span>
                           <span className="text-xs text-gray-500 font-medium flex items-center gap-1">
                             <Clock className="w-3 h-3" />
@@ -199,7 +204,7 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                     </div>
 
                     {/* Financial details grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs bg-gray-50/70 p-4 rounded-xl border border-gray-100">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-xs bg-gray-50/70 p-4 rounded-xl border border-gray-100">
                       <div>
                         <div className="text-gray-500 font-medium">Pledged Amount</div>
                         <div className="text-base font-extrabold text-[#064e3b] mt-0.5">
@@ -216,7 +221,15 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                       </div>
 
                       <div>
-                        <div className="text-gray-500 font-medium">Investor Fee ({pledge.fee_percent_at_pledge || "0"}%)</div>
+                        <div className="text-gray-500 font-medium">Conversion Eligible Units</div>
+                        <div className="text-base font-extrabold text-emerald-800 mt-0.5">
+                          {pledge.conversion_eligible_units != null ? Number(pledge.conversion_eligible_units).toLocaleString() : "0"}{" "}
+                          <span className="text-xs font-normal text-gray-500">units</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-gray-500 font-medium">Investor Fee ({pledgeFeePercent}%)</div>
                         <div className="text-base font-bold text-gray-700 mt-0.5">
                           {currency} {fee.toLocaleString()}
                         </div>
@@ -237,7 +250,7 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                           <div className="flex items-center gap-2">
                             <Sparkles className="w-4 h-4 text-emerald-600" />
                             <h4 className="text-xs font-bold uppercase tracking-wider text-[#064e3b]">
-                              Conversion Clause Entitlement
+                              Conversion Clause Entitlement & Projected Equity
                             </h4>
                           </div>
 
@@ -251,24 +264,45 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                         </p>
 
                         {conversionRights.eligible && !conversionRights.isSpvEquity && (
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 text-xs border-t border-emerald-100/60">
-                            <div>
-                              <span className="text-gray-500 block text-[11px]">Class {investorClass} Cap</span>
-                              <span className="font-bold text-[#064e3b]">{conversionRights.classCap}</span>
+                          <div className="space-y-3 pt-2 border-t border-emerald-100/60">
+                            {/* Conversion Rights Details Grid */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                              <div className="bg-white p-3 rounded-lg border border-emerald-100">
+                                <span className="text-gray-500 block text-[11px]">Class {pledgeClass} Value Cap</span>
+                                <span className="font-extrabold text-[#064e3b]">{conversionRights.classCap}</span>
+                              </div>
+                              <div className="bg-white p-3 rounded-lg border border-emerald-100">
+                                <span className="text-gray-500 block text-[11px]">Trigger Share Price</span>
+                                <span className="font-extrabold text-[#064e3b]">{conversionRights.triggerPrice}</span>
+                              </div>
+                              <div className="bg-white p-3 rounded-lg border border-emerald-100">
+                                <span className="text-gray-500 block text-[11px]">Conversion Ratio</span>
+                                <span className="font-extrabold text-[#064e3b]">{conversionRights.ratio}</span>
+                              </div>
+                              <div className="bg-white p-3 rounded-lg border border-emerald-100">
+                                <span className="text-gray-500 block text-[11px]">Conversion Cutoff (UTC)</span>
+                                <span className="font-extrabold text-[#064e3b]">
+                                  {formatUtcDate(conversionRights.deadline)}
+                                </span>
+                              </div>
                             </div>
-                            <div>
-                              <span className="text-gray-500 block text-[11px]">Trigger Share Price</span>
-                              <span className="font-bold text-[#064e3b]">{conversionRights.triggerPrice}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-500 block text-[11px]">Conversion Ratio</span>
-                              <span className="font-bold text-[#064e3b]">{conversionRights.ratio}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-500 block text-[11px]">Conversion Deadline</span>
-                              <span className="font-bold text-[#064e3b]">
-                                {formatUtcDate(conversionRights.deadline)}
-                              </span>
+
+                            {/* Live Conversion Outcome Projection */}
+                            <div className="bg-emerald-900/5 p-3.5 rounded-xl border border-emerald-900/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                              <div>
+                                <span className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider block">
+                                  Your Conversion Outcome Upon Trigger
+                                </span>
+                                <span className="text-xs text-gray-600">
+                                  Converting <strong>{Number(pledge.conversion_eligible_units || 0).toLocaleString()} Sukuk units</strong> out of {Number(pledge.pledged_units || 0).toLocaleString()} pledged units
+                                </span>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span className="text-xs text-gray-500 block">Potential Shares Acquired</span>
+                                <span className="text-base font-black text-[#064e3b]">
+                                  {(Number(pledge.conversion_eligible_units || 0) * (conversionRights.ratioShares || 1)).toLocaleString()} Shares
+                                </span>
+                              </div>
                             </div>
                           </div>
                         )}
@@ -307,9 +341,11 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
             <div className="space-y-4">
               {holdings.map((holding) => {
                 const project = holding.projects || {};
-                const conversionRights = getConversionRights(investorClass, project);
+                const holdingClass = holding.investor_class_at_pledge || investorClass;
+                const holdingFeePercent = holding.fee_percent_at_pledge != null ? holding.fee_percent_at_pledge : 0;
+                const conversionRights = getConversionRights(holdingClass, project);
                 const currency = project.currency || "USD";
-                const amount = Number(holding.principal_amount || 0);
+                const amount = Number(holding.allocated_amount || holding.pledged_amount || 0);
 
                 return (
                   <div
@@ -318,12 +354,15 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4 border-gray-100">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded border border-emerald-200">
                             {project.sharia_contract_type ? project.sharia_contract_type.replace("_", " ") : "Sukuk"}
                           </span>
+                          <span className="text-xs font-bold bg-[#064e3b] text-white px-2.5 py-0.5 rounded">
+                            Class {holdingClass} at Pledge
+                          </span>
                           <span className="text-xs text-gray-500 font-medium">
-                            Holding ID #{holding.id}
+                            Pledge / Holding ID #{holding.id}
                           </span>
                         </div>
                         <h3 className="text-xl font-extrabold text-[#064e3b] mt-1.5 flex items-center gap-2">
@@ -339,14 +378,14 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
 
                       <div className="flex items-center gap-2 self-start sm:self-auto">
                         <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 font-bold text-xs uppercase tracking-wider border border-emerald-200">
-                          {holding.status || "Active"}
+                          {holding.status || "Allocated"}
                         </span>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs bg-gray-50/70 p-4 rounded-xl border border-gray-100">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-xs bg-gray-50/70 p-4 rounded-xl border border-gray-100">
                       <div>
-                        <div className="text-gray-500 font-medium">Principal Amount</div>
+                        <div className="text-gray-500 font-medium">Allocated Amount</div>
                         <div className="text-base font-extrabold text-[#064e3b] mt-0.5">
                           {currency} {amount.toLocaleString()}
                         </div>
@@ -355,7 +394,7 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                       <div>
                         <div className="text-gray-500 font-medium">Units Held</div>
                         <div className="text-base font-extrabold text-[#064e3b] mt-0.5">
-                          {holding.units_held ? holding.units_held.toLocaleString() : "—"}{" "}
+                          {holding.pledged_units ? holding.pledged_units.toLocaleString() : "—"}{" "}
                           <span className="text-xs font-normal text-gray-500 capitalize">{project.unit_type || "units"}</span>
                         </div>
                       </div>
@@ -363,15 +402,22 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                       <div>
                         <div className="text-gray-500 font-medium">Conversion Eligible Units</div>
                         <div className="text-base font-extrabold text-emerald-800 mt-0.5">
-                          {holding.conversion_eligible_units ? holding.conversion_eligible_units.toLocaleString() : "0"}{" "}
+                          {holding.conversion_eligible_units ? Number(holding.conversion_eligible_units).toLocaleString() : "0"}{" "}
                           <span className="text-xs font-normal text-gray-500">units</span>
                         </div>
                       </div>
 
                       <div>
-                        <div className="text-gray-500 font-medium">Issued Date</div>
+                        <div className="text-gray-500 font-medium">Investor Fee</div>
+                        <div className="text-base font-bold text-gray-700 mt-0.5">
+                          {holdingFeePercent}% (Class {holdingClass})
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-gray-500 font-medium">Allocated Date</div>
                         <div className="text-xs font-bold text-gray-700 mt-1">
-                          {formatUtcDate(holding.issued_at || holding.created_at)}
+                          {formatUtcDate(holding.allocated_at || holding.pledged_at || holding.created_at)}
                         </div>
                       </div>
                     </div>
@@ -383,7 +429,7 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                           <div className="flex items-center gap-2">
                             <Sparkles className="w-4 h-4 text-emerald-600" />
                             <h4 className="text-xs font-bold uppercase tracking-wider text-[#064e3b]">
-                              Conversion Clause Entitlement
+                              Conversion Clause Entitlement & Projected Equity
                             </h4>
                           </div>
 
@@ -397,24 +443,45 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                         </p>
 
                         {conversionRights.eligible && !conversionRights.isSpvEquity && (
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 text-xs border-t border-emerald-100/60">
-                            <div>
-                              <span className="text-gray-500 block text-[11px]">Class {investorClass} Cap</span>
-                              <span className="font-bold text-[#064e3b]">{conversionRights.classCap}</span>
+                          <div className="space-y-3 pt-2 border-t border-emerald-100/60">
+                            {/* Conversion Rights Details Grid */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                              <div className="bg-white p-3 rounded-lg border border-emerald-100">
+                                <span className="text-gray-500 block text-[11px]">Class {holdingClass} Value Cap</span>
+                                <span className="font-extrabold text-[#064e3b]">{conversionRights.classCap}</span>
+                              </div>
+                              <div className="bg-white p-3 rounded-lg border border-emerald-100">
+                                <span className="text-gray-500 block text-[11px]">Trigger Share Price</span>
+                                <span className="font-extrabold text-[#064e3b]">{conversionRights.triggerPrice}</span>
+                              </div>
+                              <div className="bg-white p-3 rounded-lg border border-emerald-100">
+                                <span className="text-gray-500 block text-[11px]">Conversion Ratio</span>
+                                <span className="font-extrabold text-[#064e3b]">{conversionRights.ratio}</span>
+                              </div>
+                              <div className="bg-white p-3 rounded-lg border border-emerald-100">
+                                <span className="text-gray-500 block text-[11px]">Conversion Cutoff (UTC)</span>
+                                <span className="font-extrabold text-[#064e3b]">
+                                  {formatUtcDate(conversionRights.deadline)}
+                                </span>
+                              </div>
                             </div>
-                            <div>
-                              <span className="text-gray-500 block text-[11px]">Trigger Share Price</span>
-                              <span className="font-bold text-[#064e3b]">{conversionRights.triggerPrice}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-500 block text-[11px]">Conversion Ratio</span>
-                              <span className="font-bold text-[#064e3b]">{conversionRights.ratio}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-500 block text-[11px]">Conversion Deadline</span>
-                              <span className="font-bold text-[#064e3b]">
-                                {formatUtcDate(conversionRights.deadline)}
-                              </span>
+
+                            {/* Live Conversion Outcome Projection */}
+                            <div className="bg-emerald-900/5 p-3.5 rounded-xl border border-emerald-900/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                              <div>
+                                <span className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider block">
+                                  Your Conversion Outcome Upon Trigger
+                                </span>
+                                <span className="text-xs text-[#064e3b]/80">
+                                  Converting <strong>{Number(holding.conversion_eligible_units || 0).toLocaleString()} Sukuk units</strong> out of {Number(holding.pledged_units || 0).toLocaleString()} held units
+                                </span>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span className="text-xs text-gray-500 block">Potential Shares Acquired</span>
+                                <span className="text-base font-black text-[#064e3b]">
+                                  {(Number(holding.conversion_eligible_units || 0) * (conversionRights.ratioShares || 1)).toLocaleString()} Shares
+                                </span>
+                              </div>
                             </div>
                           </div>
                         )}

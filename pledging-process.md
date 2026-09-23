@@ -2,7 +2,8 @@
 
 > This document describes the end-to-end pledging process for the crowd-funding
 > platform, from the moment an investor clicks "Invest Now" on a project detail
-> page to the final recorded entries in the database.
+> page to the final recorded entries in the database and their representation as
+> pledges or active holdings in the investor portfolio.
 
 ---
 
@@ -13,12 +14,13 @@
 3. [Step-by-Step Pledge Flow](#step-by-step-pledge-flow)
 4. [Fee Calculation](#fee-calculation)
 5. [Wallet Balance Mechanics](#wallet-balance-mechanics)
-6. [Database Records Created](#database-records-created)
+6. [Database Records & Architectural Single-Table Model](#database-records--architectural-single-table-model)
 7. [Unit & Conversion Computation](#unit--conversion-computation)
 8. [Validation & Guard Rails](#validation--guard-rails)
 9. [Post-Pledge State & Progress Calculation](#post-pledge-state--progress-calculation)
-10. [Pledge Lifecycle & Status Transitions](#pledge-lifecycle--status-transitions)
-11. [Edge Cases & Error Handling](#edge-cases--error-handling)
+10. [Pledge Lifecycle, Status Transitions & Holdings Derivation Rules](#pledge-lifecycle-status-transitions--holdings-derivation-rules)
+11. [Portfolio Page Calculation Rules](#portfolio-page-calculation-rules)
+12. [Edge Cases & Error Handling](#edge-cases--error-handling)
 
 ---
 
@@ -33,11 +35,11 @@ investor pledges into a Sharia-compliant project, the system must:
 4. Calculate the investor fee based on their class at the time of pledge
 5. Calculate `pledged_units` = `floor(pledged_amount / unit_price)`
 6. Verify sufficient wallet balance for both the pledge amount and fee
-7. Create a **pledge** record in the `pledges` table (including `pledged_units`)
+7. Create a **pledge** record in the `pledges` table (including `pledged_units` and `conversion_eligible_units`)
 8. Deduct the total (pledge + fee) from the investor's wallet
 9. Freeze the investor's class and fee rate at pledge time (snapshot rule)
 
-*Note: Holding records in the `holdings` table are created later during the post-campaign allocation and Sukuk/share issuance phase, not at initial pledge time.*
+*Note: The platform has eliminated the separate `holdings` database table. All pledges, allocated holdings, and conversion rights are maintained directly on rows within the `pledges` table. A pledge row dynamically transitions from a pledge to a holding when its `status` transitions to `allocated` (or `active` / `completed`), at which point `allocated_amount` is set and used for holding valuations and portfolio math.*
 
 ---
 
@@ -119,7 +121,8 @@ Investor clicks "Confirm Pledge"
      investor_id,
      pledged_amount,
      pledged_units,                    // Number of units purchased
-     allocated_amount: null,           // Set later during allocation phase
+     conversion_eligible_units,        // Computed live for Classes 1–4
+     allocated_amount: null,           // Populated upon campaign allocation
      investor_class_at_pledge,         // FROZEN snapshot
      fee_percent_at_pledge,            // FROZEN snapshot
      fee_amount,                       // Computed fee
@@ -198,26 +201,30 @@ The wallet balance must be ≥ the total deduction. If insufficient:
 
 ---
 
-## Database Records Created
+## Database Records & Architectural Single-Table Model
 
-### Pledges Table Row
+The platform uses a unified, single-table architecture centered on the `pledges` table.
+The separate `holdings` database table has been **completely removed**.
 
-| Field | Value | Source |
+### Pledges Table Row Fields
+
+| Field | Value | Source & Role |
 |---|---|---|
-| `project_id` | Project's ID | From project lookup |
-| `investor_id` | Investor's ID | From investor profile |
-| `pledged_amount` | The amount the investor committed | User input (validated) |
+| `id` | Unique ID | Primary Key |
+| `project_id` | Project's ID | Foreign key to `projects` |
+| `investor_id` | Investor's ID | Foreign key to `investors` |
+| `pledged_amount` | The amount committed by investor | User input at pledge time |
 | `pledged_units` | Units purchased | `floor(pledged_amount / unit_price)` |
-| `allocated_amount` | null (initially) | Set during allocation phase |
-| `investor_class_at_pledge` | e.g., 3 | Frozen from investor's current class |
-| `fee_percent_at_pledge` | e.g., 0.7 | Frozen from CLASS_CONFIG |
+| `conversion_eligible_units` | Units eligible for equity conversion | Computed live at pledge time (Classes 1–4 only) |
+| `allocated_amount` | Final allocated holding value | Set during campaign allocation phase (null while `status = 'pending'`) |
+| `investor_class_at_pledge` | e.g., 3 | Frozen snapshot from investor's profile |
+| `fee_percent_at_pledge` | e.g., 0.7 | Frozen snapshot from CLASS_CONFIG |
 | `fee_amount` | Computed fee | `pledged_amount × fee_percent / 100` |
-| `status` | `"pending"` | Initial pledge status |
-| `pledged_at` | Current timestamp | Server-generated |
-| `allocated_at` | null | Set during allocation phase |
-| `payment_status` | `"completed"` | Wallet was debited |
-
-*Note: The `holdings` table row is created upon campaign close and funding allocation.*
+| `status` | `"pending"`, `"allocated"`, `"active"`, `"completed"`, `"cancelled"`, or `"refunded"` | Controls whether row is a Pledge or Holding |
+| `pledged_at` | Timestamp | Set at pledge submission |
+| `allocated_at` | Timestamp | Set when campaign completes and allocation occurs |
+| `redeemed_at` | Timestamp | Set when investment matures/redeems |
+| `payment_status` | `"completed"` | Wallet debit status |
 
 ---
 
@@ -231,12 +238,28 @@ pledged_units = Math.floor(pledged_amount / unit_price)
 
 If `unit_price` is not set or is 0, `pledged_units` defaults to 0.
 
-### Conversion Eligible Units (Classes 1–4 Only, Evaluated at Allocation)
+### Conversion Eligible Units (Stored on `pledges.conversion_eligible_units`)
 
-Only applies when:
-- `sharia_contract_type` is Murabaha, Mudarabah, or Ijara
-- `is_spv = true`
-- Investor is Class 1, 2, 3, or 4
+Calculated live at pledge creation when:
+- Project is not `spv_equity`
+- `is_conversion_enabled = true` on `spv_details`
+- Investor is Class 1, 2, 3, or 4 (Classes 5–10 receive 0 conversion units)
+
+**Mathematical Calculation Algorithm:**
+1. **Calculate Remaining Share Pool Capacity:**
+   $$\text{remaining\_shares\_capacity} = \text{total\_shares\_authorized} - \left( \text{conversion\_ratio\_shares} \times \sum_{\text{pledges}} \text{conversion\_eligible\_units} \right)$$
+   If $\text{remaining\_shares\_capacity} \le 0$, then `conversion_eligible_units = 0`.
+2. **Apply Investor Class Conversion Cap:**
+   - Class 1: Unlimited
+   - Class 2: AED 1,000,000
+   - Class 3: AED 500,000
+   - Class 4: AED 250,000
+   $$\text{effective\_amount} = \min(\text{pledged\_amount}, \text{class\_conversion\_cap})$$
+3. **Compute Raw Conversion Shares:**
+   $$\text{raw\_calculated\_shares} = \left\lfloor \frac{\text{effective\_amount}}{\text{unit\_price}} \right\rfloor \times \text{conversion\_ratio\_shares}$$
+4. **Cap by Share Pool Capacity and Convert to Sukuk Units:**
+   $$\text{assigned\_shares} = \min(\text{raw\_calculated\_shares}, \text{remaining\_shares\_capacity})$$
+   $$\text{conversion\_eligible\_units} = \left\lfloor \frac{\text{assigned\_shares}}{\text{conversion\_ratio\_shares}} \right\rfloor$$
 
 ---
 
@@ -286,25 +309,63 @@ const progressPercent = Math.min(rawPercent, 100).toFixed(1);
 
 ---
 
-## Pledge Lifecycle & Status Transitions
+## Pledge Lifecycle, Status Transitions & Holdings Derivation Rules
 
-### Pledge Statuses
+Holdings and pledges are no longer stored in separate tables. Instead, all positions exist in the `pledges` table and are categorized according to their `status` field.
+
+### Status Field Mapping Rules
 
 ```
-pending → allocated → active → completed
-                  ↘ cancelled
-pending → cancelled (if investor cancels before allocation)
-pending → refunded (if campaign fails)
+pledges table row status
+   │
+   ├── "pending" ────────────────────► Categorized as a PLEDGE (Awaiting campaign close)
+   │                                   - Displayed in "Pledges" tab
+   │                                   - Valuation = pledged_amount
+   │
+   ├── "allocated" | "active" | "completed" ──► Categorized as a HOLDING (Campaign funded/allocated)
+   │                                           - Displayed in "Holdings" tab & Portfolio Page
+   │                                           - allocated_amount is populated
+   │                                           - Valuation = allocated_amount
+   │
+   └── "cancelled" | "refunded" ────► EXCLUDED ENTIRELY
+                                       - Excluded from pledges tab, holdings tab, and portfolio page
 ```
 
-| Status | Meaning |
-|---|---|
-| `pending` | Pledge recorded, wallet debited, awaiting campaign close & allocation |
-| `allocated` | Campaign closed successfully, funds allocated to project |
-| `active` | Sukuk/shares have been formally issued |
-| `completed` | Investment has matured/redeemed |
-| `cancelled` | Pledge was cancelled (wallet refund triggered) |
-| `refunded` | Campaign failed, full refund processed |
+### Detailed Status Definitions
+
+| Status | Category | Meaning & Behavior |
+|---|---|---|
+| `pending` | **Pledge** | Pledge submitted and wallet debited; campaign is live and awaiting close & allocation. Counted under active pledges. |
+| `allocated` | **Holding** | Campaign closed successfully and funds allocated. The row officially becomes an active **Holding**. The `allocated_amount` field is populated with the final allocated amount. |
+| `active` | **Holding** | Sukuk or equity certificates formally issued to investor. Treated as an active holding using `allocated_amount`. |
+| `completed` | **Holding** | Investment matured or redeemed. Retained as a historical holding position using `allocated_amount`. |
+| `cancelled` | **None** | Pledge was cancelled prior to allocation. Wallet refunded. **Excluded from both pledges and holdings.** |
+| `refunded` | **None** | Campaign failed to reach minimum goal. Full refund issued. **Excluded from both pledges and holdings.** |
+
+---
+
+## Portfolio Page Calculation Rules
+
+The Portfolio Page (`/investor-portal/portfolio`) displays financial health, asset allocation, and rolled-up metrics.
+
+### Portfolio Metric Computation Rules
+
+1. **Source Data Query:**
+   - Reads rows from `pledges` table where `investor_id = current_investor_id`.
+   - Filters rows where `status` is in `['allocated', 'active', 'completed']`.
+   - Ignores rows where `status` is `pending`, `cancelled`, or `refunded`.
+
+2. **Capital Deployed Calculation:**
+   - For each holding row, the holding value is `allocated_amount` (falling back to `pledged_amount` if `allocated_amount` is null).
+   $$\text{Total Capital Deployed} = \sum_{\text{holdings}} \text{allocated\_amount}$$
+
+3. **Holding Count & Diversification:**
+   - `Holdings Count` = number of rows with status `allocated`, `active`, or `completed`.
+   - `Asset Categories` = distinct `sharia_contract_type` values across active holdings.
+   - `Asset Allocation Percentages` = $(\text{holding.allocated\_amount} / \text{Total Capital Deployed}) \times 100$.
+
+4. **Empty Portfolio State:**
+   - If no rows have status `allocated`, `active`, or `completed`, the page displays the "No Active Portfolio Holdings" empty state with a direct button to the marketplace.
 
 ---
 

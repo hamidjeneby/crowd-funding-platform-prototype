@@ -72,6 +72,7 @@ export function getConversionRights(investorClass, project) {
     classCap: caps[cls] || "Capped",
     triggerPrice,
     ratio,
+    ratioShares: Number(spvDetail?.conversion_ratio_shares) || 1,
     deadline,
     totalSharesAuthorized: spvDetail?.total_shares_authorized || null,
   };

@@ -55,19 +55,23 @@ export default async function PortfolioPage() {
     );
   }
 
-  // Active holdings present - map dbHoldings to view format
+  // Active holdings present - map dbHoldings (pledge rows with status = allocated/active/completed) to view format
   const holdings = dbHoldings.map((h, idx) => {
     const proj = h.projects || {};
-    const amount = Number(h.principal_amount || 0);
+    const amount = Number(h.allocated_amount || h.pledged_amount || 0);
+    const investorClassAtPledge = h.investor_class_at_pledge || investorClass || "?";
+    const feePercentAtPledge = h.fee_percent_at_pledge != null ? h.fee_percent_at_pledge : 0;
     return {
       id: h.id,
       project: proj.title || "Unnamed Project",
       category: proj.sharia_contract_type ? proj.sharia_contract_type.replace("_", " ").toUpperCase() : "Investment",
       amountInvested: amount,
+      investorClassAtPledge,
+      feePercentAtPledge,
       allocation: 0, // Computed below
       targetReturn: proj.expected_roi_percent ? `${proj.expected_roi_percent}% ROI` : "Equity",
-      nextPayout: h.issued_at ? new Date(h.issued_at).toLocaleDateString() : "Pending",
-      status: h.status ? h.status.toUpperCase() : "Active",
+      nextPayout: h.allocated_at ? new Date(h.allocated_at).toLocaleDateString() : h.pledged_at ? new Date(h.pledged_at).toLocaleDateString() : "Pending",
+      status: h.status ? h.status.toUpperCase() : "ALLOCATED",
       color: idx % 3 === 0 ? "#059669" : idx % 3 === 1 ? "#10b981" : "#34d399",
       currency: proj.currency || "USD",
     };
@@ -178,6 +182,7 @@ export default async function PortfolioPage() {
               <tr>
                 <th className="py-3 px-4 rounded-l-xl">Project Name</th>
                 <th className="py-3 px-4">Contract</th>
+                <th className="py-3 px-4">Pledge Class & Fee</th>
                 <th className="py-3 px-4">Amount Deployed</th>
                 <th className="py-3 px-4">Target Return</th>
                 <th className="py-3 px-4">Issued Date</th>
@@ -189,6 +194,9 @@ export default async function PortfolioPage() {
                 <tr key={h.id} className="hover:bg-emerald-50/50 transition-colors">
                   <td className="py-3.5 px-4 font-bold text-[#064e3b]">{h.project}</td>
                   <td className="py-3.5 px-4 text-gray-600">{h.category}</td>
+                  <td className="py-3.5 px-4 font-semibold text-emerald-800">
+                    Class {h.investorClassAtPledge} ({h.feePercentAtPledge}%)
+                  </td>
                   <td className="py-3.5 px-4 font-bold text-[#064e3b]">{h.currency} {h.amountInvested.toLocaleString()}</td>
                   <td className="py-3.5 px-4 text-emerald-700 font-bold">{h.targetReturn}</td>
                   <td className="py-3.5 px-4 text-gray-600">{h.nextPayout}</td>

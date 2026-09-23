@@ -84,9 +84,64 @@ export async function createPledge({ projectId, slug, amount }) {
     };
   }
 
-  // 8. Calculate Pledged Units
+  // 8. Calculate Pledged Units & Conversion Eligible Units
   const unitPrice = Number(projectDetail.unit_price) || 0;
   const pledgedUnits = unitPrice > 0 ? Math.floor(numericAmount / unitPrice) : 0;
+
+  let conversionEligibleUnits = 0;
+
+  // Check if project has conversion enabled and is NOT spv_equity
+  const isSpvEquity = projectDetail.sharia_contract_type === "spv_equity";
+  const spvDetail = Array.isArray(projectDetail.spv_details)
+    ? projectDetail.spv_details[0]
+    : projectDetail.spv_details;
+  const isConversionActive = Boolean(!isSpvEquity && projectDetail.is_spv && spvDetail?.conversion_enabled);
+
+  // Conversion privileges only apply to Classes 1–4
+  if (isConversionActive && classNum >= 1 && classNum <= 4) {
+    const totalSharesAuth = Number(spvDetail.total_shares_authorized) || 0;
+    const ratioShares = Number(spvDetail.conversion_ratio_shares) || 0;
+
+    if (totalSharesAuth > 0 && ratioShares > 0) {
+      // Step 1: Sum existing conversion_eligible_units for this project
+      const { data: existingPledges } = await supabaseAdmin
+        .from("pledges")
+        .select("conversion_eligible_units")
+        .eq("project_id", projectId)
+        .neq("status", "cancelled");
+
+      const existingConvertedUnitsSum = (existingPledges || []).reduce(
+        (sum, p) => sum + Number(p.conversion_eligible_units || 0),
+        0
+      );
+
+      // Remaining share pool capacity available
+      const remainingShareCapacity = totalSharesAuth - (ratioShares * existingConvertedUnitsSum);
+
+      if (remainingShareCapacity > 0) {
+        // Step 2: Determine conversion value cap by class (in currency)
+        let classCap = Infinity;
+        if (classNum === 2) classCap = 1000000;
+        else if (classNum === 3) classCap = 500000;
+        else if (classNum === 4) classCap = 250000;
+        // Class 1 is Infinity
+
+        // Lower of pledged_amount and class conversion cap
+        const effectiveConversionAmount = Math.min(numericAmount, classCap);
+
+        // Raw calculated conversion eligible units for this pledge
+        const rawCalculatedUnits = unitPrice > 0 ? Math.floor(effectiveConversionAmount / unitPrice) : 0;
+        const rawCalculatedShares = rawCalculatedUnits * ratioShares;
+
+        if (rawCalculatedShares > remainingShareCapacity) {
+          // Use remaining share capacity converted back to Sukuk units
+          conversionEligibleUnits = Math.floor(remainingShareCapacity / ratioShares);
+        } else {
+          conversionEligibleUnits = rawCalculatedUnits;
+        }
+      }
+    }
+  }
 
   // 9. Record Pledge in database (Pledges table only)
   const { data: newPledge, error: pledgeInsertError } = await supabaseAdmin
@@ -96,6 +151,7 @@ export async function createPledge({ projectId, slug, amount }) {
       investor_id: investorData.id,
       pledged_amount: numericAmount,
       pledged_units: pledgedUnits,
+      conversion_eligible_units: conversionEligibleUnits,
       allocated_amount: null,
       investor_class_at_pledge: classNum,
       fee_percent_at_pledge: feePercent,

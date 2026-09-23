@@ -40,6 +40,14 @@ export default function MarketplaceClient({
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedContract, setSelectedContract] = useState("all");
+  const [viewMode, setViewMode] = useState("live"); // "live" | "pre_launch"
+
+  const isClass1 = Number(investorClass) === 1;
+
+  // Count pending review projects for Class 1 badge
+  const pendingReviewCount = projects.filter(
+    (p) => p.status === "pending_review"
+  ).length;
 
   const contractOptions = [
     { value: "all", label: "All Structures" },
@@ -50,10 +58,26 @@ export default function MarketplaceClient({
   ];
 
   const filteredProjects = projects.filter((p) => {
+    // 1. Status Filter by View Mode
+    if (isClass1) {
+      if (viewMode === "pre_launch" && p.status !== "pending_review") {
+        return false;
+      }
+      if (viewMode === "live" && p.status !== "campaign_live") {
+        return false;
+      }
+    } else {
+      if (p.status !== "campaign_live") {
+        return false;
+      }
+    }
+
+    // 2. Search Query Filter
     const matchesSearch =
       p.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.summary?.toLowerCase().includes(searchQuery.toLowerCase());
 
+    // 3. Contract Filter
     const matchesContract =
       selectedContract === "all" ||
       (p.sharia_contract_type &&
@@ -72,26 +96,60 @@ export default function MarketplaceClient({
             <ShieldCheck className="w-4 h-4" /> Marketplace
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-[#064e3b] mt-1">
-            Investment Opportunities
+            {viewMode === "pre_launch"
+              ? "Class 1 Early Access Deals"
+              : "Investment Opportunities"}
           </h1>
           <p className="text-sm text-[#064e3b]/70 mt-0.5">
-            Institutional & Sharia-compliant crowdfunding deals tailored for
-            your eligibility class.
+            {viewMode === "pre_launch"
+              ? "Exclusive pre-audit deal preview for Class 1 investors to evaluate upcoming campaigns prior to public release."
+              : "Institutional & Sharia-compliant crowdfunding deals tailored for your eligibility class."}
           </p>
         </div>
 
-        {/* Investor Class Badge */}
-        <div className="flex items-center gap-3 bg-white border border-[#059669]/20 rounded-2xl p-3 shadow-sm self-start md:self-auto">
-          <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-[#059669]">
-            <Sparkles className="w-5 h-5" />
-          </div>
-          <div>
-            <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">
-              Active Access Tier
-            </span>
-            <span className="text-xs font-bold text-[#064e3b]">
-              Class {investorClass}
-            </span>
+        {/* Toolbar & Class Badge */}
+        <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
+          {/* Class 1 Toggle Button */}
+          {isClass1 && (
+            <div>
+              {viewMode === "live" ? (
+                <button
+                  onClick={() => setViewMode("pre_launch")}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-800 to-teal-900 hover:from-emerald-900 hover:to-teal-950 text-white font-bold text-xs shadow-md border border-emerald-500/30 transition-all cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4 text-emerald-400" />
+                  Class 1 Early Access
+                  {pendingReviewCount > 0 && (
+                    <span className="ml-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-950 font-extrabold text-[10px]">
+                      {pendingReviewCount}
+                    </span>
+                  )}
+                </button>
+              ) : (
+                <button
+                  onClick={() => setViewMode("live")}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-[#064e3b] hover:bg-[#047857] text-white font-bold text-xs shadow-sm transition-all cursor-pointer"
+                >
+                  <Building2 className="w-4 h-4 text-emerald-400" />
+                  Return to Live Deals
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Investor Class Badge */}
+          <div className="flex items-center gap-3 bg-white border border-[#059669]/20 rounded-2xl p-3 shadow-sm">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-[#059669]">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">
+                Active Access Tier
+              </span>
+              <span className="text-xs font-bold text-[#064e3b]">
+                Class {investorClass}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -141,6 +199,17 @@ export default function MarketplaceClient({
             const isPendingReview = project.status === "pending_review";
             const isSpvEquity = project.sharia_contract_type === "spv_equity";
 
+            const rawSpv = project.spv_details;
+            const spvDetails = Array.isArray(rawSpv) ? rawSpv[0] : rawSpv;
+
+            const hasConversionClause = !isSpvEquity && Boolean(spvDetails?.conversion_enabled);
+            const isClass1To4 = investorClass >= 1 && investorClass <= 4;
+            const totalSharesAuthorized = Number(spvDetails?.total_shares_authorized) || 0;
+            const conversionRatioShares = Number(spvDetails?.conversion_ratio_shares) || 1;
+            const totalConvertibleUnits = conversionRatioShares > 0 ? Math.floor(totalSharesAuthorized / conversionRatioShares) : 0;
+            const pledgedConvertedUnits = Number(project.live_conversion_units) || 0;
+            const conversionPercent = totalConvertibleUnits > 0 ? Math.min((pledgedConvertedUnits / totalConvertibleUnits) * 100, 100).toFixed(1) : 0;
+
             return (
               <div
                 key={project.id}
@@ -164,9 +233,8 @@ export default function MarketplaceClient({
                   <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none">
                     {/* Pre-Audit Badge for Class 1 */}
                     {isPendingReview ? (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/90 backdrop-blur-md text-white font-bold text-xs shadow-md">
-                        <AlertTriangle className="w-3.5 h-3.5" /> Pre-Audit /
-                        Unreviewed
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-teal-900/90 backdrop-blur-md text-teal-200 border border-teal-400/30 font-bold text-xs shadow-md">
+                        <Clock className="w-3.5 h-3.5 text-teal-300" /> Early Access / Pre-Audit
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-600/90 backdrop-blur-md text-white font-semibold text-xs shadow-sm capitalize">
@@ -174,11 +242,10 @@ export default function MarketplaceClient({
                       </span>
                     )}
 
-                    {/* Sharia Contract Type Tag */}
-                    {project.sharia_contract_type && (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-900/80 backdrop-blur-md text-emerald-300 font-mono text-[11px] uppercase tracking-wider shadow-sm">
-                        <Layers className="w-3 h-3 text-emerald-400" />
-                        {project.sharia_contract_type.replace("_", " ")}
+                    {/* Conversion Available Tag on Top Right */}
+                    {hasConversionClause && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#064e3b]/95 backdrop-blur-md text-emerald-300 border border-emerald-500/30 font-bold text-xs shadow-sm">
+                        <Sparkles className="w-3 h-3 text-emerald-400" /> Conversion Available
                       </span>
                     )}
                   </div>
@@ -211,7 +278,7 @@ export default function MarketplaceClient({
                   <div className="space-y-2 pt-2 border-t border-gray-100">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-gray-500 font-medium">
-                        Progress ({progressPercent}%)
+                        Funding Progress ({progressPercent}%)
                       </span>
                       <span className="font-bold text-[#064e3b]">
                         {currency} {raised.toLocaleString()} /{" "}
@@ -226,9 +293,41 @@ export default function MarketplaceClient({
                       />
                     </div>
 
+                    {/* CONVERSION PROGRESS BAR (CLASSES 1-4 ONLY) - GREEN THEME */}
+                    {hasConversionClause && isClass1To4 && totalConvertibleUnits > 0 && (
+                      <div className="pt-2 space-y-1">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-[#064e3b] font-bold flex items-center gap-1">
+                            <Sparkles className="w-3 h-3 text-[#059669]" /> Conversion Pool ({conversionPercent}%)
+                          </span>
+                          <span className="font-bold text-[#064e3b]">
+                            {pledgedConvertedUnits.toLocaleString()} / {totalConvertibleUnits.toLocaleString()} units
+                          </span>
+                        </div>
+                        <div className="w-full h-2 bg-emerald-50 rounded-full overflow-hidden border border-emerald-100">
+                          <div
+                            className="h-full bg-gradient-to-r from-[#059669] to-[#047857] rounded-full transition-all duration-500"
+                            style={{ width: `${conversionPercent}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Contract Structure Field inside Text Portion */}
+                    {project.sharia_contract_type && (
+                      <div className="flex items-center justify-between text-[11px] pt-1">
+                        <span className="text-gray-500 font-medium flex items-center gap-1">
+                          <Layers className="w-3 h-3 text-[#059669]" /> Contract Structure:
+                        </span>
+                        <span className="font-bold text-[#064e3b] uppercase font-mono">
+                          {project.sharia_contract_type.replace("_", " ")}
+                        </span>
+                      </div>
+                    )}
+
                     {/* Campaign End Date (UTC) */}
                     {project.campaign_end_date && formatUtcDate(project.campaign_end_date) && (
-                      <div className="flex items-center justify-between text-[11px] pt-1">
+                      <div className="flex items-center justify-between text-[11px] pt-0.5">
                         <span className="text-gray-400 font-medium flex items-center gap-1">
                           <Clock className="w-3 h-3 text-gray-400" /> Deadline (UTC):
                         </span>
@@ -238,7 +337,6 @@ export default function MarketplaceClient({
                       </div>
                     )}
                   </div>
-
 
                   {/* Floor Investment & Action Button */}
                   <div className="pt-2 flex items-center justify-between gap-3">
@@ -265,8 +363,29 @@ export default function MarketplaceClient({
             );
           })}
         </div>
+      ) : viewMode === "pre_launch" ? (
+        /* Pre-Launch Empty State */
+        <div className="bg-emerald-50/40 rounded-3xl border border-emerald-200/80 p-12 text-center max-w-lg mx-auto space-y-5 shadow-xs">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center mx-auto border border-emerald-300">
+            <Clock className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-lg font-bold text-[#064e3b]">
+              No Early Access Deals in Queue
+            </h3>
+            <p className="text-xs text-[#064e3b]/80 leading-relaxed">
+              There are currently no pre-launch deals undergoing compliance review. As a Class 1 investor, upcoming campaigns will automatically populate here as soon as issuers submit them for pre-audit evaluation.
+            </p>
+          </div>
+          <button
+            onClick={() => setViewMode("live")}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#064e3b] text-white font-bold text-xs hover:bg-[#047857] transition-all shadow-sm cursor-pointer"
+          >
+            <Building2 className="w-4 h-4 text-emerald-400" /> Return to Live Deals
+          </button>
+        </div>
       ) : (
-        /* Empty State */
+        /* Live Deals Empty State */
         <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center max-w-lg mx-auto space-y-4">
           <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-[#059669] flex items-center justify-center mx-auto">
             <Building2 className="w-8 h-8" />
