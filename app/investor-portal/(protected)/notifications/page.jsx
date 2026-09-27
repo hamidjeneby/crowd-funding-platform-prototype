@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import Link from "next/link";
 import {
   Bell,
   ShieldCheck,
@@ -8,76 +9,144 @@ import {
   Megaphone,
   UserCheck,
   Zap,
-  CheckCircle,
+  CheckCircle2,
   Clock,
-  Filter
+  Filter,
+  Sparkles,
+  TrendingUp,
+  Layers,
+  CheckCheck,
+  ChevronLeft,
+  ChevronRight,
+  Building2,
 } from "lucide-react";
+import {
+  getInvestorNotifications,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+} from "@/app/actions/notifications";
 
 export default function NotificationsPage() {
   const [activeTab, setActiveTab] = useState("all");
+  const [notifications, setNotifications] = useState([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState(null);
 
-  const notifications = [
-    {
-      id: 1,
-      category: "milestones",
-      title: "Milestone Verified: Groundbreaking Complete",
-      project: "Aura Luxury Residences",
-      description: "Issuer submitted verified drone imagery and municipal inspector sign-off.",
-      time: "2 hours ago",
-      date: "Sep 14, 2026",
-      isUnread: true,
-      icon: Flag,
-    },
-    {
-      id: 2,
-      category: "campaigns",
-      title: "Campaign Closing Alert: Solaris Green Energy",
-      project: "Solaris Green Energy Infrastructure",
-      description: "Campaign is currently 94% funded and closing in 48 hours.",
-      time: "1 day ago",
-      date: "Sep 13, 2026",
-      isUnread: true,
-      icon: Megaphone,
-    },
-    {
-      id: 3,
-      category: "kyc",
-      title: "Investor Classification Approved: Class 2",
-      project: "Platform Compliance",
-      description: "Your self-accreditation documentation has been verified by compliance.",
-      time: "3 days ago",
-      date: "Sep 11, 2026",
-      isUnread: false,
-      icon: UserCheck,
-    },
-    {
-      id: 4,
-      category: "underwriting",
-      title: "Exclusive Class 1 Underwriting Opportunity",
-      project: "Apex Logistics Tech Hub",
-      description: "Early access tranche offered for institutional syndicate lead positions.",
-      time: "4 days ago",
-      date: "Sep 10, 2026",
-      isUnread: false,
-      icon: Zap,
-    },
-    {
-      id: 5,
-      category: "milestones",
-      title: "System Event: Escrow Custody Release Confirmed",
-      project: "Solaris Green Energy Infrastructure",
-      description: "Escrow release executed following Phase 1 verification.",
-      time: "1 week ago",
-      date: "Sep 07, 2026",
-      isUnread: false,
-      icon: Flag,
-    },
-  ];
+  const fetchNotifications = async (currentPage, tab) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await getInvestorNotifications({
+        page: currentPage,
+        limit: 20,
+        typeFilter: tab,
+      });
 
-  const filteredNotifications =
-    activeTab === "all"
-      ? notifications
-      : notifications.filter((n) => n.category === activeTab);
+      if (res.success) {
+        setNotifications(res.notifications || []);
+        setTotalPages(res.totalPages || 1);
+        setTotalCount(res.totalCount || 0);
+      } else {
+        setError(res.error || "Failed to load notifications.");
+      }
+    } catch (err) {
+      setError("An error occurred while fetching notifications.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications(page, activeTab);
+  }, [page, activeTab]);
+
+  const handleTabChange = (tabId) => {
+    setActiveTab(tabId);
+    setPage(1);
+  };
+
+  const handleMarkAsRead = async (id) => {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, read_status: true } : n))
+    );
+    await markNotificationAsRead(id);
+  };
+
+  const handleMarkAllRead = async () => {
+    setIsSubmitting(true);
+    setNotifications((prev) =>
+      prev.map((n) => ({ ...n, read_status: true }))
+    );
+    await markAllNotificationsAsRead();
+    setIsSubmitting(false);
+  };
+
+  const unreadCount = notifications.filter((n) => {
+    if (n.read_status === undefined || n.read_status === null) return true;
+    const str = String(n.read_status).toUpperCase();
+    return str === "FALSE" || str === "0";
+  }).length;
+
+  const getTypeDetails = (type) => {
+    switch (type) {
+      case "campaign_alert":
+        return {
+          label: "Campaign Alert",
+          badgeBg: "bg-amber-100 text-amber-800 border-amber-200",
+          iconBg: "bg-amber-500 text-white",
+          icon: Clock,
+        };
+      case "funding_threshold":
+      case "funding_threshhold":
+        return {
+          label: "Funding Threshold",
+          badgeBg: "bg-emerald-100 text-[#064e3b] border-emerald-200",
+          iconBg: "bg-[#064e3b] text-emerald-300",
+          icon: TrendingUp,
+        };
+      case "conversion_pool":
+        return {
+          label: "Conversion Pool",
+          badgeBg: "bg-teal-100 text-teal-800 border-teal-200",
+          iconBg: "bg-teal-600 text-white",
+          icon: Sparkles,
+        };
+      case "milestone":
+        return {
+          label: "Milestone Update",
+          badgeBg: "bg-indigo-100 text-indigo-800 border-indigo-200",
+          iconBg: "bg-indigo-600 text-white",
+          icon: Layers,
+        };
+      default:
+        return {
+          label: "General Notice",
+          badgeBg: "bg-gray-100 text-gray-800 border-gray-200",
+          iconBg: "bg-gray-700 text-white",
+          icon: Bell,
+        };
+    }
+  };
+
+  function formatDate(dateStr) {
+    if (!dateStr) return "";
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return dateStr;
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#fcfaf7] p-6 lg:p-10 space-y-8">
@@ -91,29 +160,40 @@ export default function NotificationsPage() {
             Notifications Center
           </h1>
           <p className="text-sm text-[#064e3b]/70 mt-0.5">
-            Milestone updates, campaign alerts, compliance approvals, and underwriting offers.
+            Real-time updates on project campaign deadlines, funding thresholds, conversion pools, and milestones.
           </p>
         </div>
 
-        {/* Unread Counter Badge */}
-        <div className="px-4 py-2 rounded-xl bg-white border border-[#059669]/20 text-[#064e3b] text-xs font-bold flex items-center gap-2 shadow-xs self-start md:self-auto">
-          <Bell className="w-4 h-4 text-[#059669]" />
-          <span>2 Unread Notifications</span>
+        <div className="flex items-center gap-3 self-start md:self-auto">
+          {/* Unread Counter Badge */}
+          <div className="px-4 py-2 rounded-xl bg-white border border-[#059669]/20 text-[#064e3b] text-xs font-bold flex items-center gap-2 shadow-xs">
+            <Bell className="w-4 h-4 text-[#059669]" />
+            <span>{unreadCount} Unread on this page</span>
+          </div>
+
+          {/* Mark All Notifications as Read Button */}
+          <button
+            onClick={handleMarkAllRead}
+            disabled={isSubmitting}
+            className="px-4 py-2.5 rounded-xl bg-[#064e3b] hover:bg-[#047857] text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <CheckCheck className="w-4 h-4" /> Mark all notifications as read
+          </button>
         </div>
       </div>
 
       {/* Category Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-gray-100">
         {[
-          { id: "all", label: "All Events" },
-          { id: "milestones", label: "Milestone Updates" },
-          { id: "campaigns", label: "Campaign Alerts" },
-          { id: "kyc", label: "KYC & Class Status" },
-          { id: "underwriting", label: "Underwriting Offers (Class 1)" },
+          { id: "all", label: "All Notifications" },
+          { id: "campaign_alert", label: "Campaign Alerts" },
+          { id: "funding_threshold", label: "Funding Thresholds" },
+          { id: "conversion_pool", label: "Conversion Pool Alerts" },
+          { id: "milestone", label: "Milestones" },
         ].map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => handleTabChange(tab.id)}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeTab === tab.id
                 ? "bg-[#064e3b] text-white shadow-xs"
@@ -125,52 +205,151 @@ export default function NotificationsPage() {
         ))}
       </div>
 
-      {/* Notification Items List */}
-      <div className="space-y-4">
-        {filteredNotifications.map((item) => {
-          const IconComponent = item.icon;
-          return (
-            <div
-              key={item.id}
-              className={`p-5 rounded-2xl bg-white border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs ${
-                item.isUnread
-                  ? "border-l-4 border-l-[#059669] border-[#059669]/20 bg-emerald-50/20"
-                  : "border-gray-200 opacity-90"
-              }`}
-            >
-              <div className="flex items-start gap-4">
+      {/* Content Section */}
+      {isLoading ? (
+        <div className="py-20 text-center space-y-3">
+          <div className="w-8 h-8 border-4 border-[#064e3b] border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-xs font-semibold text-gray-500">Loading notifications...</p>
+        </div>
+      ) : error ? (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-6 text-center text-xs font-semibold">
+          {error}
+        </div>
+      ) : notifications.length === 0 ? (
+        <div className="bg-white rounded-3xl p-12 border border-gray-200/80 text-center space-y-3 shadow-xs">
+          <div className="w-12 h-12 bg-emerald-50 text-[#059669] rounded-2xl flex items-center justify-center mx-auto">
+            <Bell className="w-6 h-6" />
+          </div>
+          <h3 className="font-bold text-[#064e3b] text-base">No Notifications Found</h3>
+          <p className="text-xs text-gray-500 max-w-md mx-auto">
+            You currently have no notifications in this category. Enable project notifications on any project page to receive live updates.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="space-y-4">
+            {notifications.map((item) => {
+              const isUnread =
+                item.read_status === undefined ||
+                item.read_status === null ||
+                String(item.read_status).toUpperCase() === "FALSE" ||
+                String(item.read_status) === "0";
+              const details = getTypeDetails(item.type);
+              const IconComponent = details.icon;
+              const projectTitle = item.projects?.title;
+              const projectSlug = item.projects?.slug;
+
+              return (
                 <div
-                  className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                    item.isUnread
-                      ? "bg-[#064e3b] text-emerald-300"
-                      : "bg-emerald-100 text-[#059669]"
+                  key={item.id}
+                  className={`p-5 rounded-2xl bg-white border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs ${
+                    isUnread
+                      ? "border-l-4 border-l-[#059669] border-[#059669]/20 bg-emerald-50/20"
+                      : "border-gray-200 opacity-90"
                   }`}
                 >
-                  <IconComponent className="w-5 h-5" />
-                </div>
+                  <div className="flex items-start gap-4">
+                    <div
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${details.iconBg}`}
+                    >
+                      <IconComponent className="w-5 h-5" />
+                    </div>
 
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                      {item.category}
-                    </span>
-                    <span className="text-xs font-semibold text-gray-500">{item.project}</span>
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${details.badgeBg}`}
+                        >
+                          {details.label}
+                        </span>
+
+                        {projectTitle && (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#059669] bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200/60">
+                            <Building2 className="w-3 h-3" />
+                            {projectSlug ? (
+                              <Link
+                                href={`/investor-portal/projects/${projectSlug}`}
+                                className="hover:underline"
+                              >
+                                {projectTitle}
+                              </Link>
+                            ) : (
+                              projectTitle
+                            )}
+                          </span>
+                        )}
+                      </div>
+
+                      <h3 className="text-base font-bold text-[#064e3b]">{item.title}</h3>
+
+                      <p className="text-xs text-[#064e3b]/80 leading-relaxed max-w-3xl">
+                        {item.message}
+                      </p>
+                    </div>
                   </div>
-                  <h3 className="text-base font-bold text-[#064e3b]">{item.title}</h3>
-                  <p className="text-xs text-[#064e3b]/75 leading-relaxed">
-                    {item.description}
-                  </p>
+
+                  <div className="flex items-center gap-4 shrink-0 self-end md:self-auto">
+                    <div className="text-right">
+                      <div className="flex items-center gap-1.5 text-[11px] text-gray-400 font-medium">
+                        <Clock className="w-3.5 h-3.5" />
+                        <span>{formatDate(item.created_at)}</span>
+                      </div>
+                    </div>
+
+                    {isUnread && (
+                      <button
+                        onClick={() => handleMarkAsRead(item.id)}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-[#064e3b] font-semibold text-xs transition-colors"
+                      >
+                        Mark Read
+                      </button>
+                    )}
+                  </div>
                 </div>
+              );
+            })}
+          </div>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="bg-white rounded-2xl p-4 border border-gray-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-semibold text-gray-600">
+              <div>
+                Showing{" "}
+                <span className="font-bold text-[#064e3b]">
+                  {(page - 1) * 20 + 1}
+                </span>{" "}
+                to{" "}
+                <span className="font-bold text-[#064e3b]">
+                  {Math.min(page * 20, totalCount)}
+                </span>{" "}
+                of <span className="font-bold text-[#064e3b]">{totalCount}</span> notifications
               </div>
 
-              <div className="flex items-center gap-3 text-xs text-gray-400 font-medium self-end md:self-auto">
-                <Clock className="w-3.5 h-3.5" />
-                <span>{item.time}</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-[#064e3b] font-bold text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                >
+                  <ChevronLeft className="w-4 h-4" /> Previous
+                </button>
+
+                <span className="px-3 py-1.5 rounded-lg bg-emerald-50 text-[#064e3b] font-bold border border-emerald-200">
+                  Page {page} of {totalPages}
+                </span>
+
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-[#064e3b] font-bold text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                >
+                  Next <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
             </div>
-          );
-        })}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

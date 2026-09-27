@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { CLASS_CONFIG } from "@/app/constants/classConfig";
 import { checkInvestEligibility, getProjectDetailBySlug, parseInvestorClass } from "./marketplace";
 import { getInvestorPortalData } from "./investor-portal";
+import { ensureAutomaticPledgeSubscription, evaluateThresholdNotifications } from "./notifications";
 
 export async function createPledge({ projectId, slug, amount }) {
   const { userId } = await auth();
@@ -181,13 +182,22 @@ export async function createPledge({ projectId, slug, amount }) {
     return { success: false, error: "Pledge created but failed to update wallet balance. Please refresh." };
   }
 
-  // 10. Revalidate Cache
+  // 10. Automatic Notification Subscription (Milestones & Campaign Alerts = TRUE)
+  await ensureAutomaticPledgeSubscription(investorData.id, projectId);
+
+  // 11. Asynchronously Trigger Threshold Notification Evaluations
+  evaluateThresholdNotifications(projectId, newPledge.id).catch((err) => {
+    console.error("Background notification evaluation error:", err);
+  });
+
+  // 12. Revalidate Cache
   revalidatePath(`/projects/${slug}`);
   revalidatePath(`/investor-portal/projects/${slug}`);
   revalidatePath("/investor-portal");
   revalidatePath("/investor-portal/marketplace");
   revalidatePath("/investor-portal/portfolio");
   revalidatePath("/investor-portal/wallet");
+  revalidatePath("/investor-portal/notifications");
 
   return {
     success: true,

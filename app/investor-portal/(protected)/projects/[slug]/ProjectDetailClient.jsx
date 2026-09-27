@@ -24,9 +24,11 @@ import {
   Info,
   Wallet,
   CreditCard,
+  Bell,
 } from "lucide-react";
 import { createPledge } from "@/app/actions/pledge";
 import { CLASS_CONFIG } from "@/app/constants/classConfig";
+import NotificationSettingsModal from "@/app/investor-portal/components/NotificationSettingsModal";
 
 function formatUtcDate(dateString) {
   if (!dateString) return null;
@@ -100,7 +102,22 @@ export default function ProjectDetailClient({
   const classCapMap = { 1: Infinity, 2: 1000000, 3: 500000, 4: 250000 };
   const classConversionCap = classCapMap[investorClass] || 0;
 
-  const sortedMilestones = [...(project.project_milestones || [])].sort(
+  const approvedMilestonesOnly = (project.project_milestones || []).filter(
+    (m) => {
+      if (!m) return false;
+      if (m.milestone_source === "system") return true;
+      const rawStatus =
+        m.mileston_verification_status ??
+        m.milestone_verification_status ??
+        m.verification_status;
+      if (rawStatus === null || rawStatus === undefined) return true;
+      const vStatus = String(rawStatus).trim().toLowerCase();
+      if (vStatus === "pending" || vStatus === "rejected") return false;
+      return true;
+    },
+  );
+
+  const sortedMilestones = [...approvedMilestonesOnly].sort(
     (a, b) => {
       if (!a.target_date && !b.target_date) return 0;
       if (!a.target_date) return -1;
@@ -142,6 +159,7 @@ export default function ProjectDetailClient({
 
   // Pledge Modal State
   const [isPledgeModalOpen, setIsPledgeModalOpen] = useState(false);
+  const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
   const [pledgeAmount, setPledgeAmount] = useState(minFloor.toString());
   const [isSubmittingPledge, setIsSubmittingPledge] = useState(false);
   const [pledgeError, setPledgeError] = useState("");
@@ -226,7 +244,14 @@ export default function ProjectDetailClient({
           </Link>
 
           <div className="flex items-center gap-3">
-            <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-[#059669] border border-emerald-200 font-bold text-xs">
+            <button
+              type="button"
+              onClick={() => setIsNotificationModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-[#064e3b] font-semibold text-xs transition-colors border border-emerald-300/80 shadow-2xs"
+            >
+              <Bell className="w-3.5 h-3.5 text-[#059669]" /> Enable Notifications
+            </button>
+            <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-[#059669] border border-emerald-200 font-bold text-xs">
               Class {investorClass} Access
             </span>
             {isPendingReview && (
@@ -946,9 +971,7 @@ export default function ProjectDetailClient({
 
                           <span className="text-[11px] font-semibold text-gray-500">
                             {milestone.target_date
-                              ? new Date(
-                                  milestone.target_date,
-                                ).toLocaleDateString()
+                              ? formatUtcDate(milestone.target_date) || "Target Date TBD"
                               : "Target Date TBD"}
                           </span>
                         </div>
@@ -1279,6 +1302,14 @@ export default function ProjectDetailClient({
           </div>
         </div>
       )}
+
+      {/* Notification Preferences Modal */}
+      <NotificationSettingsModal
+        isOpen={isNotificationModalOpen}
+        onClose={() => setIsNotificationModalOpen(false)}
+        projectId={project.id}
+        investorClass={investorClass}
+      />
     </div>
   );
 }

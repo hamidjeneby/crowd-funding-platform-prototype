@@ -104,6 +104,7 @@ export async function ensureSystemMilestonesExist(projectId, campaignEndDate = n
       milestone_source: "system",
       status: "upcoming",
       target_date: null,
+      mileston_verification_status: "approved",
     });
   }
 
@@ -117,6 +118,7 @@ export async function ensureSystemMilestonesExist(projectId, campaignEndDate = n
       milestone_source: "system",
       status: "upcoming",
       target_date: campaignEndDate ? parseAsUtcIso(campaignEndDate) : null,
+      mileston_verification_status: "approved",
     });
   }
 
@@ -139,11 +141,26 @@ export async function ensureSystemMilestonesExist(projectId, campaignEndDate = n
       milestone_source: "system",
       status: "upcoming",
       target_date: custodyDate,
+      mileston_verification_status: "approved",
     });
   }
 
   if (systemMilestonesToCreate.length > 0) {
     await supabaseAdmin.from("project_milestones").insert(systemMilestonesToCreate);
+  }
+
+  // Ensure existing system milestones have mileston_verification_status set to 'approved'
+  if (existing && existing.length > 0) {
+    const unapprovedSystemIds = existing
+      .filter((m) => (m.mileston_verification_status || m.milestone_verification_status) !== "approved")
+      .map((m) => m.id);
+
+    if (unapprovedSystemIds.length > 0) {
+      await supabaseAdmin
+        .from("project_milestones")
+        .update({ mileston_verification_status: "approved" })
+        .in("id", unapprovedSystemIds);
+    }
   }
 
   // Update target dates for existing system milestones if campaignEndDate is set

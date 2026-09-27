@@ -341,6 +341,20 @@ export async function getProjectDetailBySlug(slug, investorClassRaw) {
     }
   }
 
+  // Filter milestones for investor portal: only show approved (or system / legacy) milestones, strictly excluding pending or rejected ones
+  const approvedMilestones = (rawMilestones || []).filter((m) => {
+    if (!m) return false;
+    if (m.milestone_source === "system") return true;
+    const rawStatus =
+      m.mileston_verification_status ??
+      m.milestone_verification_status ??
+      m.verification_status;
+    if (rawStatus === null || rawStatus === undefined) return true;
+    const vStatus = String(rawStatus).trim().toLowerCase();
+    if (vStatus === "pending" || vStatus === "rejected") return false;
+    return true;
+  });
+
   return {
     ...project,
     spv_details: spvDetails,
@@ -350,7 +364,7 @@ export async function getProjectDetailBySlug(slug, investorClassRaw) {
     project_media: mediaWithUrls,
     project_docs: docsWithSignedUrls,
     shariah_certificate_doc: shariahCertDoc,
-    project_milestones: rawMilestones,
+    project_milestones: approvedMilestones,
   };
 }
 
