@@ -1,107 +1,159 @@
-"use client";
-
+import { auth } from "@clerk/nextjs/server";
+import { supabaseAdmin } from "@/lib/supabase";
 import Link from "next/link";
+import { getLiveRaisedAmounts } from "@/app/actions/marketplace";
 import {
-  LayoutDashboard,
-  TrendingUp,
-  AlertTriangle,
-  Clock,
-  CheckCircle2,
-  FileX,
-  Plus,
-  ArrowUpRight,
-  FolderOpen,
-  Calendar,
   Building2,
-  Flag,
+  TrendingUp,
+  Clock,
+  AlertTriangle,
+  FolderOpen,
+  Plus,
+  Sliders,
+  CheckCircle2,
+  ArrowUpRight,
   ShieldAlert,
+  ChevronRight,
+  FileText,
 } from "lucide-react";
 
-export default function IssuerPortalDashboard() {
-  // Dummy cross-project snapshot data for visualization
-  const actionItems = [
-    {
-      id: 1,
-      projectTitle: "Apex Logistics Tech Hub",
-      projectSlug: "apex-logistics-tech-hub",
-      type: "rejected_document",
-      severity: "high",
-      title: "Valuation Report Needs Revision",
-      message:
-        "Auditor requested updated 2026 Q2 independent valuation report with certified auditor signature stamp.",
-      date: "2 hours ago",
-    },
-    {
-      id: 2,
-      projectTitle: "Oasis Green Residential",
-      projectSlug: "oasis-green-residential",
-      type: "changes_requested",
-      severity: "medium",
-      title: "SPV Cap Table Clarification Required",
-      message:
-        "Please clarify Class B preferred share allocation ratio in section 4.2 of the submitted Cap Table.",
-      date: "1 day ago",
-    },
-  ];
+export default async function IssuerPortalDashboard() {
+  const { userId, orgId } = await auth();
 
-  const projectStatusCounts = [
-    { label: "Draft", count: 1, bg: "bg-gray-100 text-gray-700 border-gray-200" },
-    { label: "In Review", count: 1, bg: "bg-amber-100 text-amber-800 border-amber-200" },
-    { label: "Campaign Live", count: 3, bg: "bg-emerald-100 text-[#064e3b] border-emerald-200" },
-    { label: "Funded", count: 2, bg: "bg-teal-100 text-teal-800 border-teal-200" },
-    { label: "Closed", count: 2, bg: "bg-slate-100 text-slate-800 border-slate-200" },
-  ];
+  if (!userId || !orgId) {
+    return <div>Unauthorized</div>;
+  }
 
-  const upcomingMilestones = [
-    {
-      id: 101,
-      projectTitle: "Solaris Green Energy Phase II",
-      projectSlug: "solaris-green-energy",
-      milestone: "Municipal Grid Tie-in Audit",
-      source: "system",
-      targetDate: "Oct 12, 2026",
-      daysLeft: 16,
-      status: "in_progress",
-    },
-    {
-      id: 102,
-      projectTitle: "Aura Luxury Residences",
-      projectSlug: "aura-luxury-residences",
-      milestone: "Phase 2 Structural Foundation Verification",
-      source: "issuer",
-      targetDate: "Oct 28, 2026",
-      daysLeft: 32,
-      status: "pending_confirmation",
-    },
-    {
-      id: 103,
-      projectTitle: "Horizon Logistics Terminal",
-      projectSlug: "horizon-logistics-terminal",
-      milestone: "SPV Escrow Release Verification",
-      source: "system",
-      targetDate: "Nov 05, 2026",
-      daysLeft: 40,
-      status: "scheduled",
-    },
-  ];
+  // Fetch issuer profile by org_id
+  const { data: issuer } = await supabaseAdmin
+    .from("issuers")
+    .select("*")
+    .eq("org_id", orgId)
+    .maybeSingle();
+
+  const legalName = issuer?.legal_entity_name || "Organization Issuer";
+  const onboardingStatus = issuer?.onboarding_status || "incomplete";
+  const isFullyCompleted = onboardingStatus === "completed";
+
+  let projects = [];
+  let lifetimeCapitalRaised = 0;
+  let liveCampaignsCount = 0;
+  let draftCount = 0;
+  let underReviewCount = 0;
+
+  if (issuer?.id) {
+    // 1. Fetch issuer's projects
+    const { data: projectsData } = await supabaseAdmin
+      .from("projects")
+      .select("*, spv_details(*)")
+      .eq("issuer_id", issuer.id)
+      .order("created_at", { ascending: false });
+
+    const rawProjects = projectsData || [];
+
+    // Calculate project counts by status
+    liveCampaignsCount = rawProjects.filter(
+      (p) => p.status === "campaign_live"
+    ).length;
+    draftCount = rawProjects.filter((p) => p.status === "draft").length;
+    underReviewCount = rawProjects.filter(
+      (p) => p.status === "pending_review"
+    ).length;
+
+    // 2. Fetch all pledges across all issuer's projects for lifetime raised capital calculation
+    const projectIds = rawProjects.map((p) => p.id);
+    if (projectIds.length > 0) {
+      const { data: pledgesData } = await supabaseAdmin
+        .from("pledges")
+        .select("project_id, pledged_amount, allocated_amount, status")
+        .in("project_id", projectIds);
+
+      const allPledges = pledgesData || [];
+
+      // Lifetime capital raised: SUM(allocated_amount || pledged_amount) where status IN (allocated, active, completed)
+      const validLifetimePledges = allPledges.filter((p) =>
+        ["allocated", "active", "completed"].includes(
+          (p.status || "").toLowerCase()
+        )
+      );
+
+      lifetimeCapitalRaised = validLifetimePledges.reduce(
+        (sum, p) => sum + Number(p.allocated_amount || p.pledged_amount || 0),
+        0
+      );
+
+      // Fetch live raised totals for snapshot cards
+      const raisedTotals = await getLiveRaisedAmounts(projectIds);
+      projects = rawProjects.map((p) => ({
+        ...p,
+        live_raised_amount: raisedTotals[p.id] || 0,
+      }));
+    } else {
+      projects = rawProjects;
+    }
+  }
+
+  // Top 3-5 projects snapshot
+  const recentProjects = projects.slice(0, 5);
+
+  function getStatusBadgeStyle(status) {
+    switch (status) {
+      case "draft":
+        return "bg-gray-100 text-gray-700 border-gray-300";
+      case "pending_review":
+        return "bg-amber-100 text-amber-800 border-amber-300";
+      case "campaign_live":
+        return "bg-emerald-600 text-white border-emerald-700 shadow-xs";
+      case "funded":
+        return "bg-teal-600 text-white border-teal-700 shadow-xs";
+      case "closed":
+        return "bg-slate-700 text-white border-slate-800";
+      default:
+        return "bg-gray-100 text-gray-800 border-gray-200";
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#fcfaf7] p-6 lg:p-10 space-y-8 text-[#064e3b]">
-      {/* Header */}
+      {/* SECTION 1: HEADER BANNER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#059669]/15 pb-6">
         <div>
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#059669]">
-            <Building2 className="w-4 h-4" /> Issuer Executive Dashboard
+          <div className="flex items-center gap-2">
+            <span className="px-3 py-1 rounded-full bg-emerald-100 text-[#064e3b] font-extrabold text-xs border border-emerald-200 flex items-center gap-1.5 shadow-2xs">
+              <Building2 className="w-4 h-4 text-[#059669]" /> {legalName}
+            </span>
+
+            {/* Onboarding Status Badge if not completed */}
+            {!isFullyCompleted && (
+              <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-900 font-extrabold text-xs border border-amber-300 flex items-center gap-1.5 capitalize">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" /> KYB Status: {onboardingStatus}
+              </span>
+            )}
+            {isFullyCompleted && (
+              <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 font-extrabold text-xs border border-emerald-300 flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> KYB Approved
+              </span>
+            )}
           </div>
-          <h1 className="text-3xl font-extrabold text-[#064e3b] mt-1">
-            Portfolio Overview
+
+          <h1 className="text-3xl font-extrabold text-[#064e3b] mt-2">
+            Issuer Executive Dashboard
           </h1>
           <p className="text-sm text-[#064e3b]/70 mt-0.5">
-            Cross-project snapshot, capital metrics, action items, and live milestone trackers.
+            Lifetime capital metrics, active project pipeline, and project management snapshots.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
+          {!isFullyCompleted && (
+            <Link
+              href="/issuer-portal/onboarding"
+              className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-all shadow-md flex items-center gap-2"
+            >
+              Complete Onboarding <ArrowUpRight className="w-4 h-4" />
+            </Link>
+          )}
+
           <Link
             href="/issuer-portal/projects/new"
             className="px-5 py-2.5 rounded-xl bg-[#064e3b] hover:bg-[#047857] text-white font-bold text-xs transition-all shadow-md flex items-center gap-2 cursor-pointer"
@@ -111,53 +163,10 @@ export default function IssuerPortalDashboard() {
         </div>
       </div>
 
-      {/* SURFACED REVIEWER ACTION ITEMS BANNER (SURFACED RIGHT AT TOP) */}
-      {actionItems.length > 0 && (
-        <div className="bg-amber-500/10 border-2 border-amber-500/30 rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-amber-500/20 pb-3">
-            <div className="flex items-center gap-2 text-amber-900 font-extrabold text-sm uppercase tracking-wider">
-              <ShieldAlert className="w-5 h-5 text-amber-600 animate-pulse" />
-              <span>Pending Reviewer Action Items ({actionItems.length})</span>
-            </div>
-            <span className="text-xs font-semibold text-amber-800 bg-amber-200/80 px-2.5 py-1 rounded-full">
-              Blocking Items Surfaced
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {actionItems.map((item) => (
-              <div
-                key={item.id}
-                className="bg-white rounded-2xl p-4 border border-amber-200 shadow-xs space-y-2 flex flex-col justify-between"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md">
-                      {item.projectTitle}
-                    </span>
-                    <span className="text-[11px] text-gray-400 font-medium">{item.date}</span>
-                  </div>
-                  <h4 className="font-bold text-xs text-gray-900">{item.title}</h4>
-                  <p className="text-xs text-gray-600 leading-relaxed">{item.message}</p>
-                </div>
-
-                <div className="pt-2 border-t border-gray-100 flex justify-end">
-                  <Link
-                    href={`/issuer-portal/projects`}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-amber-800 hover:text-amber-900"
-                  >
-                    Resolve in Project <ArrowUpRight className="w-3.5 h-3.5" />
-                  </Link>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* METRIC SNAPSHOT CARDS */}
+      {/* SECTION 2: TOP STAT CARDS (FOUR CARDS) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        <div className="bg-white rounded-3xl p-6 border border-gray-200/80 shadow-xs space-y-2">
+        {/* Card 1: Total Capital Raised (Lifetime) */}
+        <div className="bg-white rounded-3xl p-6 border border-gray-200/80 shadow-xs space-y-2 flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
               Total Capital Raised
@@ -166,13 +175,16 @@ export default function IssuerPortalDashboard() {
               <TrendingUp className="w-5 h-5" />
             </div>
           </div>
-          <div className="text-3xl font-extrabold text-[#064e3b]">$18,450,000</div>
+          <div className="text-3xl font-extrabold text-[#064e3b]">
+            USD {lifetimeCapitalRaised.toLocaleString()}
+          </div>
           <p className="text-xs text-emerald-700 font-semibold flex items-center gap-1">
-            <CheckCircle2 className="w-3.5 h-3.5" /> Across 9 projects total
+            <CheckCircle2 className="w-3.5 h-3.5 text-[#059669]" /> Lifetime allocated capital
           </p>
         </div>
 
-        <div className="bg-white rounded-3xl p-6 border border-gray-200/80 shadow-xs space-y-2">
+        {/* Card 2: Live Campaigns Count */}
+        <div className="bg-white rounded-3xl p-6 border border-gray-200/80 shadow-xs space-y-2 flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
               Live Campaigns
@@ -181,118 +193,177 @@ export default function IssuerPortalDashboard() {
               <Clock className="w-5 h-5" />
             </div>
           </div>
-          <div className="text-3xl font-extrabold text-[#064e3b]">3 Active</div>
+          <div className="text-3xl font-extrabold text-[#064e3b]">
+            {liveCampaignsCount} Active
+          </div>
           <p className="text-xs text-gray-500 font-semibold">
-            Avg 78% target goal achieved
+            Active marketplace deals
           </p>
         </div>
 
-        <div className="bg-white rounded-3xl p-6 border border-gray-200/80 shadow-xs space-y-2">
+        {/* Card 3: Projects in Draft */}
+        <div className="bg-white rounded-3xl p-6 border border-gray-200/80 shadow-xs space-y-2 flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-              In Review / Draft
+              Projects in Draft
+            </span>
+            <div className="w-9 h-9 bg-gray-100 text-gray-700 rounded-xl flex items-center justify-center">
+              <FileText className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="text-3xl font-extrabold text-[#064e3b]">
+            {draftCount} Drafts
+          </div>
+          <p className="text-xs text-gray-500 font-semibold">
+            In-progress creation wizard
+          </p>
+        </div>
+
+        {/* Card 4: Projects Under Review */}
+        <div className="bg-white rounded-3xl p-6 border border-gray-200/80 shadow-xs space-y-2 flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+              Projects Under Review
             </span>
             <div className="w-9 h-9 bg-amber-100 text-amber-700 rounded-xl flex items-center justify-center">
               <AlertTriangle className="w-5 h-5" />
             </div>
           </div>
-          <div className="text-3xl font-extrabold text-[#064e3b]">2 Pending</div>
-          <p className="text-xs text-amber-700 font-semibold">
-            1 Draft, 1 Pending Audit Review
-          </p>
-        </div>
-
-        <div className="bg-white rounded-3xl p-6 border border-gray-200/80 shadow-xs space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-              Funded & Closed
-            </span>
-            <div className="w-9 h-9 bg-[#064e3b] text-emerald-300 rounded-xl flex items-center justify-center">
-              <FolderOpen className="w-5 h-5" />
-            </div>
+          <div className="text-3xl font-extrabold text-[#064e3b]">
+            {underReviewCount} Pending
           </div>
-          <div className="text-3xl font-extrabold text-[#064e3b]">4 Completed</div>
-          <p className="text-xs text-emerald-700 font-semibold">
-            100% distribution compliance
+          <p className="text-xs text-amber-700 font-semibold">
+            Under auditor review
           </p>
         </div>
       </div>
 
-      {/* PROJECT STATUS BREAKDOWN GRID */}
-      <div className="bg-white rounded-3xl p-6 border border-gray-200/80 shadow-xs space-y-4">
-        <h3 className="font-bold text-base text-[#064e3b]">
-          Cross-Project Status Snapshot
-        </h3>
-
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          {projectStatusCounts.map((s, idx) => (
-            <div
-              key={idx}
-              className={`p-4 rounded-2xl border text-center space-y-1 ${s.bg}`}
-            >
-              <span className="text-xs font-bold uppercase tracking-wider block">
-                {s.label}
-              </span>
-              <span className="text-2xl font-extrabold block">{s.count}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* UPCOMING MILESTONE DEADLINES ACROSS LIVE PROJECTS */}
-      <div className="bg-white rounded-3xl p-6 border border-gray-200/80 shadow-xs space-y-5">
+      {/* SECTION 3: LIVE PROJECTS SNAPSHOT */}
+      <div className="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200/80 shadow-xs space-y-6">
         <div className="flex items-center justify-between border-b border-gray-100 pb-4">
           <div>
-            <h3 className="font-bold text-base text-[#064e3b]">
-              Upcoming Milestone Deadlines Across Live Projects
-            </h3>
-            <p className="text-xs text-gray-500">
-              Track progress, system audits, and confirmation status.
+            <h2 className="text-xl font-bold text-[#064e3b] flex items-center gap-2">
+              <FolderOpen className="w-5 h-5 text-[#059669]" /> Live Projects Snapshot
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Recent projects pipeline with funding progress and quick access to project management.
             </p>
           </div>
+
           <Link
             href="/issuer-portal/projects"
             className="text-xs font-bold text-[#059669] hover:underline flex items-center gap-1"
           >
-            Manage Projects <ArrowUpRight className="w-3.5 h-3.5" />
+            View All Projects ({projects.length}) <ChevronRight className="w-4 h-4" />
           </Link>
         </div>
 
-        <div className="space-y-3">
-          {upcomingMilestones.map((m) => (
-            <div
-              key={m.id}
-              className="p-4 rounded-2xl border border-gray-100 hover:border-emerald-200 bg-gray-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all"
+        {recentProjects.length === 0 ? (
+          <div className="p-12 text-center text-xs text-gray-500 bg-[#fcfaf7] rounded-2xl border border-dashed border-gray-200 space-y-3">
+            <Building2 className="w-10 h-10 text-gray-300 mx-auto" />
+            <p className="font-semibold text-gray-700 text-sm">No Projects Created Yet</p>
+            <p className="max-w-md mx-auto">
+              Start by creating your first project draft to raise capital on the marketplace.
+            </p>
+            <Link
+              href="/issuer-portal/projects/new"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#064e3b] text-white font-bold text-xs hover:bg-[#047857] transition-all shadow-sm"
             >
-              <div className="flex items-start gap-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-100 text-[#059669] flex items-center justify-center shrink-0 mt-0.5">
-                  <Flag className="w-4 h-4" />
-                </div>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md">
-                      {m.projectTitle}
-                    </span>
-                    <span className="text-[10px] font-mono text-gray-400 uppercase">
-                      {m.source} milestone
-                    </span>
-                  </div>
-                  <h4 className="font-bold text-xs text-gray-900">{m.milestone}</h4>
-                </div>
-              </div>
+              <Plus className="w-4 h-4" /> Create First Project
+            </Link>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {recentProjects.map((project) => {
+              const status = project.status || "draft";
+              const isDraft = status === "draft";
+              const isPendingReview = status === "pending_review";
+              const canManage = !isDraft && !isPendingReview;
 
-              <div className="flex items-center gap-4 shrink-0 self-end md:self-auto">
-                <div className="text-right text-xs">
-                  <span className="text-gray-400 font-medium block">Target Date</span>
-                  <span className="font-bold text-[#064e3b]">{m.targetDate}</span>
+              const targetGoal = Number(project.target_goal) || 0;
+              const liveRaised = Number(project.live_raised_amount) || 0;
+              const percent =
+                targetGoal > 0
+                  ? Math.min((liveRaised / targetGoal) * 100, 100).toFixed(1)
+                  : 0;
+              const currency = project.currency || "USD";
+
+              return (
+                <div
+                  key={project.id}
+                  className="bg-[#fcfaf7] rounded-2xl p-5 border border-gray-200/80 flex flex-col justify-between space-y-4 hover:border-emerald-300 hover:shadow-md transition-all"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span
+                        className={`px-2.5 py-0.5 text-[10px] font-extrabold rounded-full border uppercase tracking-wider ${getStatusBadgeStyle(
+                          status
+                        )}`}
+                      >
+                        {status.replace("_", " ")}
+                      </span>
+                    </div>
+
+                    <h3 className="font-bold text-base text-[#064e3b] line-clamp-1">
+                      {project.title || "Untitled Project"}
+                    </h3>
+                    <p className="text-xs text-gray-500 line-clamp-2">
+                      {project.summary || "No summary provided."}
+                    </p>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="space-y-2 bg-white p-3.5 rounded-xl border border-gray-200/60">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-gray-500">
+                        Funding Progress
+                      </span>
+                      <span className="font-extrabold text-[#064e3b]">
+                        {percent}%
+                      </span>
+                    </div>
+
+                    <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
+                      <div
+                        className="bg-gradient-to-r from-[#059669] to-[#047857] h-full rounded-full transition-all duration-500"
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
+
+                    <div className="flex justify-between text-[11px] font-semibold text-gray-700 pt-0.5">
+                      <span>
+                        Raised: {currency} {liveRaised.toLocaleString()}
+                      </span>
+                      <span>
+                        Goal: {currency}{" "}
+                        {targetGoal > 0 ? targetGoal.toLocaleString() : "TBD"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Management Action Button */}
+                  <div className="pt-2 flex items-center gap-2">
+                    {canManage ? (
+                      <Link
+                        href={`/issuer-portal/projects/${project.slug || project.id}/manage`}
+                        className="w-full py-2.5 px-3 rounded-xl bg-[#064e3b] hover:bg-[#047857] text-white font-bold text-xs transition-all shadow-xs flex items-center justify-center gap-1.5"
+                      >
+                        <Sliders className="w-3.5 h-3.5" /> Manage Project
+                      </Link>
+                    ) : (
+                      <Link
+                        href={`/issuer-portal/projects/${project.slug || project.id}/edit`}
+                        className="w-full py-2.5 px-3 rounded-xl bg-gray-100 text-gray-800 border border-gray-200 font-bold text-xs hover:bg-gray-200 transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <Sliders className="w-3.5 h-3.5" /> View / Edit Draft
+                      </Link>
+                    )}
+                  </div>
                 </div>
-                <div className="px-3 py-1 rounded-full bg-emerald-100 text-[#064e3b] font-bold text-xs border border-emerald-200">
-                  {m.daysLeft} Days Left
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
