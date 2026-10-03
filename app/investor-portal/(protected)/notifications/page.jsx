@@ -6,19 +6,15 @@ import {
   Bell,
   ShieldCheck,
   Flag,
-  Megaphone,
-  UserCheck,
-  Zap,
-  CheckCircle2,
-  Clock,
-  Filter,
-  Sparkles,
   TrendingUp,
+  Clock,
+  Sparkles,
   Layers,
   CheckCheck,
   ChevronLeft,
   ChevronRight,
   Building2,
+  AlertTriangle,
 } from "lucide-react";
 import {
   getInvestorNotifications,
@@ -32,6 +28,7 @@ export default function NotificationsPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [totalUnreadCount, setTotalUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -50,6 +47,7 @@ export default function NotificationsPage() {
         setNotifications(res.notifications || []);
         setTotalPages(res.totalPages || 1);
         setTotalCount(res.totalCount || 0);
+        setTotalUnreadCount(res.totalUnreadCount || 0);
       } else {
         setError(res.error || "Failed to load notifications.");
       }
@@ -73,6 +71,7 @@ export default function NotificationsPage() {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read_status: true } : n))
     );
+    setTotalUnreadCount((prev) => Math.max(0, prev - 1));
     await markNotificationAsRead(id);
   };
 
@@ -81,22 +80,18 @@ export default function NotificationsPage() {
     setNotifications((prev) =>
       prev.map((n) => ({ ...n, read_status: true }))
     );
+    setTotalUnreadCount(0);
     await markAllNotificationsAsRead();
     setIsSubmitting(false);
   };
 
-  const unreadCount = notifications.filter((n) => {
-    if (n.read_status === undefined || n.read_status === null) return true;
-    const str = String(n.read_status).toUpperCase();
-    return str === "FALSE" || str === "0";
-  }).length;
-
   const getTypeDetails = (type) => {
-    switch (type) {
+    const cleanType = String(type || "").toLowerCase();
+    switch (cleanType) {
       case "campaign_alert":
         return {
           label: "Campaign Alert",
-          badgeBg: "bg-amber-100 text-amber-800 border-amber-200",
+          badgeBg: "bg-amber-100 text-amber-900 border-amber-300",
           iconBg: "bg-amber-500 text-white",
           icon: Clock,
         };
@@ -104,28 +99,28 @@ export default function NotificationsPage() {
       case "funding_threshhold":
         return {
           label: "Funding Threshold",
-          badgeBg: "bg-emerald-100 text-[#064e3b] border-emerald-200",
+          badgeBg: "bg-emerald-100 text-[#064e3b] border-emerald-300",
           iconBg: "bg-[#064e3b] text-emerald-300",
           icon: TrendingUp,
         };
       case "conversion_pool":
         return {
           label: "Conversion Pool",
-          badgeBg: "bg-teal-100 text-teal-800 border-teal-200",
+          badgeBg: "bg-teal-100 text-teal-900 border-teal-300",
           iconBg: "bg-teal-600 text-white",
           icon: Sparkles,
         };
       case "milestone":
         return {
           label: "Milestone Update",
-          badgeBg: "bg-indigo-100 text-indigo-800 border-indigo-200",
+          badgeBg: "bg-indigo-100 text-indigo-900 border-indigo-300",
           iconBg: "bg-indigo-600 text-white",
           icon: Layers,
         };
       default:
         return {
-          label: "General Notice",
-          badgeBg: "bg-gray-100 text-gray-800 border-gray-200",
+          label: "System Notice",
+          badgeBg: "bg-gray-100 text-gray-800 border-gray-300",
           iconBg: "bg-gray-700 text-white",
           icon: Bell,
         };
@@ -136,6 +131,7 @@ export default function NotificationsPage() {
     if (!dateStr) return "";
     try {
       const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
       return d.toLocaleDateString(undefined, {
         month: "short",
         day: "numeric",
@@ -160,7 +156,7 @@ export default function NotificationsPage() {
             Notifications Center
           </h1>
           <p className="text-sm text-[#064e3b]/70 mt-0.5">
-            Real-time updates on project campaign deadlines, funding thresholds, conversion pools, and milestones.
+            Real-time notifications on campaign deadlines, funding thresholds, conversion pools, and milestones.
           </p>
         </div>
 
@@ -168,17 +164,19 @@ export default function NotificationsPage() {
           {/* Unread Counter Badge */}
           <div className="px-4 py-2 rounded-xl bg-white border border-[#059669]/20 text-[#064e3b] text-xs font-bold flex items-center gap-2 shadow-xs">
             <Bell className="w-4 h-4 text-[#059669]" />
-            <span>{unreadCount} Unread on this page</span>
+            <span>{totalUnreadCount} Unread Notification{totalUnreadCount === 1 ? "" : "s"}</span>
           </div>
 
           {/* Mark All Notifications as Read Button */}
-          <button
-            onClick={handleMarkAllRead}
-            disabled={isSubmitting}
-            className="px-4 py-2.5 rounded-xl bg-[#064e3b] hover:bg-[#047857] text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 disabled:opacity-50"
-          >
-            <CheckCheck className="w-4 h-4" /> Mark all notifications as read
-          </button>
+          {totalUnreadCount > 0 && (
+            <button
+              onClick={handleMarkAllRead}
+              disabled={isSubmitting}
+              className="px-4 py-2.5 rounded-xl bg-[#064e3b] hover:bg-[#047857] text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+            >
+              <CheckCheck className="w-4 h-4" /> Mark all as read
+            </button>
+          )}
         </div>
       </div>
 
@@ -209,7 +207,7 @@ export default function NotificationsPage() {
       {isLoading ? (
         <div className="py-20 text-center space-y-3">
           <div className="w-8 h-8 border-4 border-[#064e3b] border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-xs font-semibold text-gray-500">Loading notifications...</p>
+          <p className="text-xs font-semibold text-gray-500">Loading live notifications...</p>
         </div>
       ) : error ? (
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-6 text-center text-xs font-semibold">
@@ -222,7 +220,7 @@ export default function NotificationsPage() {
           </div>
           <h3 className="font-bold text-[#064e3b] text-base">No Notifications Found</h3>
           <p className="text-xs text-gray-500 max-w-md mx-auto">
-            You currently have no notifications in this category. Enable project notifications on any project page to receive live updates.
+            You currently have no notifications in this category. Live alerts generated by campaign deadlines, funding thresholds, conversion pools, and milestones will automatically appear here.
           </p>
         </div>
       ) : (
@@ -250,7 +248,7 @@ export default function NotificationsPage() {
                 >
                   <div className="flex items-start gap-4">
                     <div
-                      className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${details.iconBg}`}
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-2xs ${details.iconBg}`}
                     >
                       <IconComponent className="w-5 h-5" />
                     </div>
@@ -265,11 +263,11 @@ export default function NotificationsPage() {
 
                         {projectTitle && (
                           <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#059669] bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200/60">
-                            <Building2 className="w-3 h-3" />
+                            <Building2 className="w-3 h-3 text-[#059669]" />
                             {projectSlug ? (
                               <Link
                                 href={`/investor-portal/projects/${projectSlug}`}
-                                className="hover:underline"
+                                className="hover:underline text-[#064e3b]"
                               >
                                 {projectTitle}
                               </Link>
@@ -283,7 +281,7 @@ export default function NotificationsPage() {
                       <h3 className="text-base font-bold text-[#064e3b]">{item.title}</h3>
 
                       <p className="text-xs text-[#064e3b]/80 leading-relaxed max-w-3xl">
-                        {item.message}
+                        {item.message || item.notification_text || item.description}
                       </p>
                     </div>
                   </div>
@@ -299,7 +297,7 @@ export default function NotificationsPage() {
                     {isUnread && (
                       <button
                         onClick={() => handleMarkAsRead(item.id)}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-[#064e3b] font-semibold text-xs transition-colors"
+                        className="px-3 py-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-[#064e3b] font-semibold text-xs transition-colors cursor-pointer"
                       >
                         Mark Read
                       </button>
@@ -329,7 +327,7 @@ export default function NotificationsPage() {
                 <button
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page <= 1}
-                  className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-[#064e3b] font-bold text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                  className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-[#064e3b] font-bold text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
                 >
                   <ChevronLeft className="w-4 h-4" /> Previous
                 </button>
@@ -341,7 +339,7 @@ export default function NotificationsPage() {
                 <button
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
-                  className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-[#064e3b] font-bold text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                  className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-[#064e3b] font-bold text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
                 >
                   Next <ChevronRight className="w-4 h-4" />
                 </button>

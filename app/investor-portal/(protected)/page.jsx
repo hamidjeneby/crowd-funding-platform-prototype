@@ -16,7 +16,6 @@ import {
   ChevronRight,
   AlertTriangle,
   Sparkles,
-  Lock,
   Layers,
   CheckCircle2,
   DollarSign,
@@ -54,7 +53,6 @@ export default async function InvestorDashboardPage() {
   const investor = await getInvestorPortalData();
   const investorClassNum = await parseInvestorClass(investor?.investor_class);
   const isClass1To4 = investorClassNum >= 1 && investorClassNum <= 4;
-  const isClass1 = investorClassNum === 1;
 
   const investorId = investor?.id;
 
@@ -476,38 +474,6 @@ export default async function InvestorDashboardPage() {
                 </div>
               </div>
             ))}
-          </div>
-        </div>
-      )}
-
-      {/* SECTION 7: UNDERWRITING OFFERS (CLASS 1 INVESTORS ONLY) */}
-      {isClass1 && (
-        <div className="bg-gradient-to-br from-emerald-950 via-[#064e3b] to-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-lg space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
-            <div>
-              <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-extrabold text-[10px] uppercase tracking-wider border border-emerald-500/30">
-                Class 1 Institutional Privilege
-              </span>
-              <h3 className="text-xl font-extrabold mt-1 text-white">
-                Underwriting Desk Offers
-              </h3>
-              <p className="text-xs text-emerald-200/80 mt-0.5">
-                Exclusive primary underwriting lead allocation offers for Class 1 accredited institutions.
-              </p>
-            </div>
-            <span className="px-3 py-1 rounded-full bg-white/10 text-white font-semibold text-xs border border-white/20 self-start sm:self-auto">
-              0 Pending Offers
-            </span>
-          </div>
-
-          <div className="p-6 rounded-2xl bg-white/5 border border-white/10 text-center text-xs text-emerald-100/70 space-y-2">
-            <Lock className="w-6 h-6 text-emerald-400 mx-auto" />
-            <p className="font-semibold text-white">
-              Underwriting Offers Registry Desk
-            </p>
-            <p className="max-w-md mx-auto text-emerald-200/70">
-              When issuers open underwriting allocations for upcoming campaigns, primary offer sheets will appear here for priority commitment.
-            </p>
           </div>
         </div>
       )}

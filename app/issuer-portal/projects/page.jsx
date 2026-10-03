@@ -350,12 +350,12 @@ export default async function ProjectsPage() {
 
                   {/* Action Buttons Footer */}
                   <div className="mt-auto pt-4 border-t border-gray-100 flex items-center gap-2">
-                    {/* Button 1: View or Edit */}
+                    {/* Button 1: Edit Draft or Preview Listing */}
                     <Link
                       href={
                         isDraft
                           ? `/issuer-portal/projects/${project.slug || project.id}/edit`
-                          : `/projects/${project.slug}`
+                          : `/issuer-portal/projects/${project.slug || project.id}/preview`
                       }
                       className={`flex-1 flex items-center justify-center py-2.5 px-3 rounded-xl text-xs font-bold transition-all shadow-xs ${
                         isDraft
@@ -367,11 +367,6 @@ export default async function ProjectsPage() {
                         <>
                           <Edit className="w-3.5 h-3.5 mr-1.5" />
                           Edit Draft
-                        </>
-                      ) : isPendingReview ? (
-                        <>
-                          <Edit className="w-3.5 h-3.5 mr-1.5" />
-                          View Draft
                         </>
                       ) : (
                         <>

@@ -3,6 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import slugify from "slugify";
+import { triggerMakeWebhook } from "@/lib/webhook";
 
 // Helper function to get issuer record by orgId
 async function getIssuerByOrgId(orgId) {
@@ -639,6 +640,12 @@ export async function submitProjectForReview(projectId) {
     console.error("Error submitting project:", updateError);
     throw new Error("Failed to submit project.");
   }
+
+  // Trigger Make Webhook for project review
+  triggerMakeWebhook({
+    type: "project_review",
+    project_id: projectId,
+  });
 
   return { success: true };
 }

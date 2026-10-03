@@ -107,10 +107,16 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
   const { userId, issuerId } = await verifyProjectAccess(projectId);
   const results = { documents: 0, media: 0, cover: false };
 
+  const SENSITIVE_BUCKETS = ["investor_docs", "investor_reps", "project_docs", "issuer_reps", "issuer_docs"];
+
   for (const file of uploadedFiles) {
-    const { data: { publicUrl } } = supabaseAdmin.storage
+    let { data: { publicUrl } } = supabaseAdmin.storage
       .from(file.bucket)
       .getPublicUrl(file.path);
+
+    if (SENSITIVE_BUCKETS.includes(file.bucket) && publicUrl) {
+      publicUrl = publicUrl.replace("/object/public/", "/object/authenticated/");
+    }
 
     if (file.category === "document") {
       if (file.type === "other") {

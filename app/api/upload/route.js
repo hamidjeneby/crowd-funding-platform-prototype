@@ -105,10 +105,15 @@ export async function POST(request) {
       );
     }
 
-    // Get public URL
+    // Get public/authenticated URL
+    const SENSITIVE_BUCKETS = ["investor_docs", "investor_reps", "project_docs", "issuer_reps", "issuer_docs"];
     const {
-      data: { publicUrl },
+      data: { publicUrl: rawUrl },
     } = supabaseAdmin.storage.from(bucket).getPublicUrl(filePath);
+
+    const publicUrl = SENSITIVE_BUCKETS.includes(bucket) && rawUrl
+      ? rawUrl.replace("/object/public/", "/object/authenticated/")
+      : rawUrl;
 
     // Save to DB
     let dbRecord = null;

@@ -1,11 +1,12 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
+import { auth, clerkClient } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { encrypt, decrypt } from "@/app/utils/crypto";
 import { syncOrganizationTypeAndMetadata } from "@/app/actions/organization";
+import { triggerMakeWebhook } from "@/lib/webhook";
 
 export async function syncOrganizationAndMembership(
   orgId,
@@ -244,7 +245,7 @@ export async function saveStage2Rep(formData) {
     const {
       data: { publicUrl },
     } = supabaseAdmin.storage.from("issuer_reps").getPublicUrl(filePath);
-    fileUrl = publicUrl;
+    fileUrl = publicUrl ? publicUrl.replace("/object/public/", "/object/authenticated/") : publicUrl;
   }
 
   const payload = {
@@ -370,7 +371,7 @@ export async function saveStage3Doc(formData) {
   const {
     data: { publicUrl },
   } = supabaseAdmin.storage.from("issuer_docs").getPublicUrl(filePath);
-  const fileUrl = publicUrl;
+  const fileUrl = publicUrl ? publicUrl.replace("/object/public/", "/object/authenticated/") : publicUrl;
 
   const { data: existing } = await supabaseAdmin
     .from("issuer_docs")
@@ -474,6 +475,29 @@ export async function submitApplication() {
     .eq("org_id", orgId);
 
   if (error) throw new Error("Failed to submit application.");
+
+  // Sync user publicMetadata.role to Clerk profile
+  try {
+    const client = await clerkClient();
+    await client.users.updateUserMetadata(userId, {
+      publicMetadata: { role: "issuer" },
+    });
+  } catch (metaErr) {
+    console.error("Error updating Clerk user publicMetadata in issuer onboarding:", metaErr);
+  }
+
+  const { data: issuer } = await supabaseAdmin
+    .from("issuers")
+    .select("id")
+    .eq("org_id", orgId)
+    .maybeSingle();
+
+  // Trigger Make Webhook
+  triggerMakeWebhook({
+    type: "issuer_onboarding_review",
+    issuer_id: issuer?.id,
+  });
+
   revalidatePath("/issuer-portal/onboarding");
   return { success: true };
 }

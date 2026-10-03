@@ -57,18 +57,6 @@ export default function IssuerNotificationsPage() {
       badgeColor: "bg-rose-100 text-rose-800 border-rose-200",
     },
     {
-      id: 4,
-      category: "underwriter_commitments",
-      title: "Class 1 Lead Underwriter Commitment Confirmed",
-      project: "Horizon Logistics Terminal",
-      description: "Apex Capital Syndicate (Class 1 Institutional) committed $5,000,000 as Lead Underwriter.",
-      time: "1 day ago",
-      date: "Sep 25, 2026",
-      isUnread: false,
-      icon: Sparkles,
-      badgeColor: "bg-teal-100 text-teal-800 border-teal-200",
-    },
-    {
       id: 5,
       category: "milestone_outcomes",
       title: "Milestone Confirmation Outcome: Groundbreaking Verified",
@@ -123,7 +111,7 @@ export default function IssuerNotificationsPage() {
             Issuer Notifications
           </h1>
           <p className="text-sm text-[#064e3b]/70 mt-0.5">
-            Reviewer decisions, milestone confirmations, underwriter commitments, and Mudarabah payout reminders.
+            Reviewer decisions, milestone confirmations, and Mudarabah payout reminders.
           </p>
         </div>
 
@@ -150,7 +138,6 @@ export default function IssuerNotificationsPage() {
           { id: "all", label: "All Events" },
           { id: "reviewer_decisions", label: "Reviewer Decisions" },
           { id: "milestone_outcomes", label: "Milestone Outcomes" },
-          { id: "underwriter_commitments", label: "Underwriter Commitments" },
           { id: "payout_reminders", label: "Payout Reminders (Mudarabah)" },
           { id: "campaign_updates", label: "Campaign Updates" },
         ].map((tab) => (

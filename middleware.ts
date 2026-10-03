@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 
 const isInvestorPortal = createRouteMatcher(["/investor-portal(.*)"]);
 const isIssuerPortal = createRouteMatcher(["/issuer-portal(.*)"]);
+const isAuditorPortal = createRouteMatcher(["/auditor-portal(.*)"]);
 
 export default clerkMiddleware(async (auth, req) => {
   const { userId, sessionClaims } = await auth();
@@ -16,6 +17,11 @@ export default clerkMiddleware(async (auth, req) => {
 
   if (!userId && isIssuerPortal(req)) {
     const signInUrl = new URL("/issuer/sign-in", req.url);
+    return NextResponse.redirect(signInUrl);
+  }
+
+  if (!userId && isAuditorPortal(req)) {
+    const signInUrl = new URL("/auditor/sign-in", req.url);
     return NextResponse.redirect(signInUrl);
   }
 

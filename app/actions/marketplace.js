@@ -187,38 +187,42 @@ export async function getVisibleProjectsQuery(investorClassRaw) {
 /**
  * Server-side lookup for project detail by slug with strict class eligibility verification
  */
-export async function getProjectDetailBySlug(slug, investorClassRaw) {
-  if (!slug) return null;
+/**
+ * Shared server-side function to fetch and shape exact investor-facing project data.
+ * Assumes authorization/visibility checks have been performed by the caller.
+ */
+export async function getInvestorFacingProjectData(slugOrId) {
+  if (!slugOrId) return null;
 
-  const classNum = typeof investorClassRaw === "number" ? investorClassRaw : (parseInt(String(investorClassRaw || "").replace(/\D/g, ""), 10) || 10);
+  let query = supabaseAdmin.from("projects").select(`
+    *,
+    spv_details (*)
+  `);
 
-  // 1. Fetch project by slug
-  const { data: project, error: pError } = await supabaseAdmin
-    .from("projects")
-    .select(`
-      *,
-      spv_details (*)
-    `)
-    .eq("slug", slug)
-    .maybeSingle();
+  if (!isNaN(Number(slugOrId))) {
+    query = query.or(`id.eq.${slugOrId},slug.eq.${slugOrId}`);
+  } else {
+    query = query.eq("slug", slugOrId);
+  }
+
+  const { data: project, error: pError } = await query.maybeSingle();
 
   if (pError || !project) {
     return null;
   }
 
-  // 2. Re-verify visibility check
-  if (!checkProjectVisibilityInternal(project, classNum)) {
-    return null;
-  }
-
-  // 3. Ensure system milestones exist for project
+  // Ensure system milestones exist
   await ensureSystemMilestonesExist(project.id, project.campaign_end_date);
 
-  // 4. Resolve spv_details (handle array, object, or direct query fallback)
+  // Resolve spv_details
   let spvDetails = null;
   if (Array.isArray(project.spv_details) && project.spv_details.length > 0) {
     spvDetails = project.spv_details[0];
-  } else if (project.spv_details && typeof project.spv_details === "object" && !Array.isArray(project.spv_details)) {
+  } else if (
+    project.spv_details &&
+    typeof project.spv_details === "object" &&
+    !Array.isArray(project.spv_details)
+  ) {
     spvDetails = project.spv_details;
   }
 
@@ -233,32 +237,38 @@ export async function getProjectDetailBySlug(slug, investorClassRaw) {
     }
   }
 
-  // 5. Fetch related media, docs (filtered), and milestones
-  const [mediaRes, docsRes, milestonesRes, raisedTotals, conversionTotals] = await Promise.all([
-    supabaseAdmin
-      .from("project_media")
-      .select("*")
-      .eq("project_id", project.id)
-      .order("display_order", { ascending: true }),
-    supabaseAdmin
-      .from("project_docs")
-      .select("*")
-      .eq("project_id", project.id)
-      .in("doc_type", ["pitch_deck", "balance_sheet", "valuation_report", "cap_table"]),
-    supabaseAdmin
-      .from("project_milestones")
-      .select("*")
-      .eq("project_id", project.id)
-      .order("target_date", { ascending: true }),
-    getLiveRaisedAmounts([project.id]),
-    getLiveConversionTotals([project.id]),
-  ]);
+  // Fetch related media, docs (filtered), and milestones
+  const [mediaRes, docsRes, milestonesRes, raisedTotals, conversionTotals] =
+    await Promise.all([
+      supabaseAdmin
+        .from("project_media")
+        .select("*")
+        .eq("project_id", project.id)
+        .order("display_order", { ascending: true }),
+      supabaseAdmin
+        .from("project_docs")
+        .select("*")
+        .eq("project_id", project.id)
+        .in("doc_type", [
+          "pitch_deck",
+          "balance_sheet",
+          "valuation_report",
+          "cap_table",
+        ]),
+      supabaseAdmin
+        .from("project_milestones")
+        .select("*")
+        .eq("project_id", project.id)
+        .order("target_date", { ascending: true }),
+      getLiveRaisedAmounts([project.id]),
+      getLiveConversionTotals([project.id]),
+    ]);
 
   const rawDocs = docsRes.data || [];
   const rawMedia = mediaRes.data || [];
   const rawMilestones = milestonesRes.data || [];
 
-  // Generate signed/resolved URLs for project_media items
+  // Generate signed URLs for project_media items
   const mediaWithUrls = await Promise.all(
     rawMedia.map(async (item) => {
       const rawUrl = item.url || item.media_url;
@@ -282,7 +292,7 @@ export async function getProjectDetailBySlug(slug, investorClassRaw) {
     })
   );
 
-  // Generate signed URL for cover_image_url if present
+  // Generate signed URL for cover_image_url
   let resolvedCoverUrl = project.cover_image_url;
   if (resolvedCoverUrl && resolvedCoverUrl.includes("/cover_img/")) {
     const urlParts = resolvedCoverUrl.split("/cover_img/");
@@ -296,9 +306,16 @@ export async function getProjectDetailBySlug(slug, investorClassRaw) {
     }
   }
 
-  // Generate signed URLs for allowed documents
+  // Filter rawDocs for investors: strictly EXCLUDE spv_registration and EXCLUDE pending/rejected docs
+  const approvedDocs = rawDocs.filter((doc) => {
+    if (!doc) return false;
+    const status = (doc.review_status || "").trim().toLowerCase();
+    if (status === "pending" || status === "rejected") return false;
+    return true;
+  });
+
   const docsWithSignedUrls = await Promise.all(
-    rawDocs.map(async (doc) => {
+    approvedDocs.map(async (doc) => {
       let signedUrl = doc.file_url;
       if (doc.file_url) {
         const urlParts = doc.file_url.split("/project_docs/");
@@ -319,7 +336,7 @@ export async function getProjectDetailBySlug(slug, investorClassRaw) {
     })
   );
 
-  // If Sharia certificate doc ID is set, check if a doc or signed URL exists for it
+  // Sharia cert doc
   let shariahCertDoc = null;
   if (project.shariah_certificate_doc_id) {
     const { data: certDoc } = await supabaseAdmin
@@ -341,7 +358,7 @@ export async function getProjectDetailBySlug(slug, investorClassRaw) {
     }
   }
 
-  // Filter milestones for investor portal: only show approved (or system / legacy) milestones, strictly excluding pending or rejected ones
+  // Filter milestones for investor portal: approved milestones only
   const approvedMilestones = (rawMilestones || []).filter((m) => {
     if (!m) return false;
     if (m.milestone_source === "system") return true;
@@ -366,6 +383,37 @@ export async function getProjectDetailBySlug(slug, investorClassRaw) {
     shariah_certificate_doc: shariahCertDoc,
     project_milestones: approvedMilestones,
   };
+}
+
+/**
+ * Server-side lookup for project detail by slug with strict class eligibility verification
+ */
+export async function getProjectDetailBySlug(slug, investorClassRaw) {
+  if (!slug) return null;
+
+  const classNum =
+    typeof investorClassRaw === "number"
+      ? investorClassRaw
+      : parseInt(String(investorClassRaw || "").replace(/\D/g, ""), 10) || 10;
+
+  // 1. Fetch project row for visibility verification
+  const { data: project, error: pError } = await supabaseAdmin
+    .from("projects")
+    .select("id, status, min_eligible_investor_class, target_goal")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (pError || !project) {
+    return null;
+  }
+
+  // 2. Verify visibility
+  if (!checkProjectVisibilityInternal(project, classNum)) {
+    return null;
+  }
+
+  // 3. Fetch shared investor-facing project data
+  return getInvestorFacingProjectData(slug);
 }
 
 /**

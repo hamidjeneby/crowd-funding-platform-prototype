@@ -348,6 +348,13 @@ export async function getInvestorNotifications(options = {}) {
       return { success: false, error: error.message || "Failed to load notifications" };
     }
 
+    // Fetch total unread count for investor across all notifications
+    const { count: unreadCount } = await supabaseAdmin
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("investor_id", investor.id)
+      .or("read_status.eq.false,read_status.is.null");
+
     const totalCount = count || 0;
     const totalPages = Math.ceil(totalCount / limit) || 1;
 
@@ -355,12 +362,60 @@ export async function getInvestorNotifications(options = {}) {
       success: true,
       notifications: data || [],
       totalCount,
+      totalUnreadCount: unreadCount || 0,
       totalPages,
       page,
     };
   } catch (err) {
     console.error("Unexpected error in getInvestorNotifications:", err);
     return { success: false, error: err.message || "Failed to load notifications" };
+  }
+}
+
+/**
+ * Triggers milestone completion notifications to subscribed investors when a milestone is completed.
+ * (As specified in Section 5 of notifications_guide.md)
+ */
+export async function triggerMilestoneCompletedNotifications(milestoneId) {
+  if (!milestoneId) return;
+  try {
+    const { data: milestone } = await supabaseAdmin
+      .from("project_milestones")
+      .select("*, projects(id, title, slug)")
+      .eq("id", milestoneId)
+      .maybeSingle();
+
+    if (!milestone || (milestone.status || "").toLowerCase() !== "completed") return;
+
+    const projectId = milestone.project_id;
+    const project = milestone.projects;
+    if (!project) return;
+
+    // Fetch subscribers for milestones
+    const { data: subs } = await supabaseAdmin
+      .from("project_notification_subscriptions")
+      .select("investor_id")
+      .eq("project_id", projectId)
+      .eq("notify_milestones", true);
+
+    if (!subs || subs.length === 0) return;
+
+    const isSystem = milestone.milestone_source === "system";
+    const textKey = isSystem ? "system_milestone" : "issuer_milestone";
+
+    const notificationsToInsert = subs.map((sub) => ({
+      investor_id: sub.investor_id,
+      project_id: projectId,
+      type: "milestone",
+      notification_text: textKey,
+      title: `${project.title}: Milestone Completed!`,
+      message: `Milestone "${milestone.title}" has been completed for project "${project.title}".`,
+      read_status: false,
+    }));
+
+    await supabaseAdmin.from("notifications").insert(notificationsToInsert);
+  } catch (err) {
+    console.error("Error triggering milestone completion notification:", err);
   }
 }
 

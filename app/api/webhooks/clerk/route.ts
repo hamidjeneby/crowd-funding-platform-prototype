@@ -85,6 +85,23 @@ export async function POST(req: Request) {
           .from("investors")
           .upsert([{ user_id: id }], { onConflict: "user_id" });
       }
+
+      if (role === "auditor") {
+        await supabaseAdmin
+          .from("auditors")
+          .upsert(
+            [
+              {
+                user_id: id,
+                email,
+                first_name: firstName,
+                last_name: lastName,
+                status: "active",
+              },
+            ],
+            { onConflict: "user_id" }
+          );
+      }
     }
 
     // ----------------------------------------------------
@@ -103,7 +120,6 @@ export async function POST(req: Request) {
         email,
         first_name: firstName,
         last_name: lastName,
-        updated_at: new Date().toISOString(),
       };
 
       if (role) {
@@ -116,6 +132,23 @@ export async function POST(req: Request) {
         .eq("user_id", id);
 
       if (error) throw error;
+
+      if (role === "auditor") {
+        await supabaseAdmin
+          .from("auditors")
+          .upsert(
+            [
+              {
+                user_id: id,
+                email,
+                first_name: firstName,
+                last_name: lastName,
+                status: "active",
+              },
+            ],
+            { onConflict: "user_id" }
+          );
+      }
     }
 
     // ----------------------------------------------------
@@ -124,8 +157,9 @@ export async function POST(req: Request) {
     if (eventType === "user.deleted") {
       const { id } = evt.data;
       if (id) {
-        // Delete user's memberships first, then delete user record
+        // Delete user's memberships & auditor profile first, then delete user record
         await supabaseAdmin.from("memberships").delete().eq("user_id", id);
+        await supabaseAdmin.from("auditors").delete().eq("user_id", id);
         await supabaseAdmin.from("users").delete().eq("user_id", id);
       }
     }

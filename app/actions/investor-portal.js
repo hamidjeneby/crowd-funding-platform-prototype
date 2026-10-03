@@ -355,3 +355,102 @@ export async function getInvestorHoldingsAndPledges() {
     pledges,
   };
 }
+
+export async function getInvestorMilestonesPageData() {
+  const investor = await getInvestorPortalData();
+  if (!investor?.id) {
+    return { investor, heldProjects: [] };
+  }
+
+  const investorId = investor.id;
+
+  // 1. Fetch all pledges for investor with joined projects data
+  const { data: pledgesData, error: pledgesErr } = await supabaseAdmin
+    .from("pledges")
+    .select(`
+      *,
+      projects (
+        id,
+        title,
+        slug,
+        unit_type,
+        sharia_contract_type,
+        currency,
+        target_goal,
+        status,
+        spv_details (*)
+      )
+    `)
+    .eq("investor_id", investorId)
+    .order("pledged_at", { ascending: false });
+
+  if (pledgesErr) {
+    console.error("Error fetching investor pledges for milestones:", pledgesErr);
+  }
+
+  const validPledges = (pledgesData || []).filter(
+    (p) => !["cancelled", "refunded"].includes((p.status || "").toLowerCase())
+  );
+
+  // 2. Group pledges by project ID
+  const projectMap = new Map();
+  validPledges.forEach((p) => {
+    const proj = p.projects;
+    if (!proj) return;
+
+    const existing = projectMap.get(proj.id) || {
+      id: proj.id,
+      title: proj.title,
+      slug: proj.slug,
+      category: proj.spv_details?.asset_class || proj.unit_type || "Investment Asset",
+      currency: proj.currency || "USD",
+      holdingAmount: 0,
+      pledgesCount: 0,
+      milestones: [],
+    };
+
+    existing.holdingAmount += Number(p.allocated_amount || p.pledged_amount || 0);
+    existing.pledgesCount += 1;
+    projectMap.set(proj.id, existing);
+  });
+
+  const heldProjectIds = Array.from(projectMap.keys());
+
+  // 3. Fetch milestones for all held projects
+  if (heldProjectIds.length > 0) {
+    const { data: milestonesData, error: msErr } = await supabaseAdmin
+      .from("project_milestones")
+      .select("*")
+      .in("project_id", heldProjectIds)
+      .order("target_date", { ascending: true });
+
+    if (msErr) {
+      console.error("Error fetching project milestones:", msErr);
+    }
+
+    (milestonesData || []).forEach((m) => {
+      const rawStatus =
+        m.mileston_verification_status ??
+        m.milestone_verification_status ??
+        m.verification_status;
+      const vStatus = rawStatus ? String(rawStatus).trim().toLowerCase() : null;
+
+      // Investor visibility filter: exclude pending or rejected issuer milestones
+      if (m.milestone_source !== "system" && (vStatus === "pending" || vStatus === "rejected")) {
+        return;
+      }
+
+      const projObj = projectMap.get(m.project_id);
+      if (projObj) {
+        projObj.milestones.push(m);
+      }
+    });
+  }
+
+  const heldProjects = Array.from(projectMap.values());
+
+  return {
+    investor,
+    heldProjects,
+  };
+}
