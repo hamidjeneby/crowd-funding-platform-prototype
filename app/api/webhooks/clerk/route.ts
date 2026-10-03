@@ -3,15 +3,30 @@ import { WebhookEvent, clerkClient } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 
 async function syncAuditorRecord(
-  id: string,
+  clerkUserId: string,
   email: string,
   firstName: string,
   lastName: string
 ) {
+  // 1. Resolve internal integer primary key from users table
+  const { data: userRow, error: userFetchErr } = await supabaseAdmin
+    .from("users")
+    .select("id")
+    .eq("user_id", clerkUserId)
+    .maybeSingle();
+
+  if (userFetchErr || !userRow) {
+    console.error("User record not found in users table for auditor sync:", clerkUserId);
+    return;
+  }
+
+  const internalUserId = userRow.id; // integer / bigint primary key (e.g. 34)
+
+  // 2. Check if auditor record exists for this internal integer user_id
   const { data: existingAuditor } = await supabaseAdmin
     .from("auditors")
     .select("id")
-    .eq("user_id", id)
+    .eq("user_id", internalUserId)
     .maybeSingle();
 
   if (existingAuditor) {
@@ -23,7 +38,7 @@ async function syncAuditorRecord(
         last_name: lastName,
         status: "active",
       })
-      .eq("user_id", id);
+      .eq("user_id", internalUserId);
 
     if (error) {
       console.error("Error updating auditor record:", error);
@@ -31,7 +46,7 @@ async function syncAuditorRecord(
     }
   } else {
     const { error } = await supabaseAdmin.from("auditors").insert({
-      user_id: id,
+      user_id: internalUserId,
       email,
       first_name: firstName,
       last_name: lastName,

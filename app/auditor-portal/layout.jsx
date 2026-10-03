@@ -22,15 +22,24 @@ export default async function AuditorPortalLayout({ children }) {
   let auditor = null;
 
   if (isGatePassed) {
-    // Fetch individual auditor profile record from Supabase
-    const { data: auditorData } = await supabaseAdmin
-      .from("auditors")
-      .select("*")
+    // 1. Fetch internal integer ID from users table
+    const { data: userRow } = await supabaseAdmin
+      .from("users")
+      .select("id")
       .eq("user_id", userId)
       .maybeSingle();
 
-    if (auditorData) {
-      auditor = auditorData;
+    if (userRow) {
+      // 2. Fetch individual auditor profile record using integer user_id foreign key
+      const { data: auditorData } = await supabaseAdmin
+        .from("auditors")
+        .select("*")
+        .eq("user_id", userRow.id)
+        .maybeSingle();
+
+      if (auditorData) {
+        auditor = auditorData;
+      }
     }
   }
 
