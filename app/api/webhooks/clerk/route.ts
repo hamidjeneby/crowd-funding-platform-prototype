@@ -2,6 +2,49 @@ import { Webhook } from "svix";
 import { WebhookEvent, clerkClient } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 
+async function syncAuditorRecord(
+  id: string,
+  email: string,
+  firstName: string,
+  lastName: string
+) {
+  const { data: existingAuditor } = await supabaseAdmin
+    .from("auditors")
+    .select("id")
+    .eq("user_id", id)
+    .maybeSingle();
+
+  if (existingAuditor) {
+    const { error } = await supabaseAdmin
+      .from("auditors")
+      .update({
+        email,
+        first_name: firstName,
+        last_name: lastName,
+        status: "active",
+      })
+      .eq("user_id", id);
+
+    if (error) {
+      console.error("Error updating auditor record:", error);
+      throw error;
+    }
+  } else {
+    const { error } = await supabaseAdmin.from("auditors").insert({
+      user_id: id,
+      email,
+      first_name: firstName,
+      last_name: lastName,
+      status: "active",
+    });
+
+    if (error) {
+      console.error("Error inserting auditor record:", error);
+      throw error;
+    }
+  }
+}
+
 export async function POST(req: Request) {
   const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
 
@@ -87,20 +130,7 @@ export async function POST(req: Request) {
       }
 
       if (role === "auditor") {
-        await supabaseAdmin
-          .from("auditors")
-          .upsert(
-            [
-              {
-                user_id: id,
-                email,
-                first_name: firstName,
-                last_name: lastName,
-                status: "active",
-              },
-            ],
-            { onConflict: "user_id" }
-          );
+        await syncAuditorRecord(id, email, firstName, lastName);
       }
     }
 
@@ -134,20 +164,7 @@ export async function POST(req: Request) {
       if (error) throw error;
 
       if (role === "auditor") {
-        await supabaseAdmin
-          .from("auditors")
-          .upsert(
-            [
-              {
-                user_id: id,
-                email,
-                first_name: firstName,
-                last_name: lastName,
-                status: "active",
-              },
-            ],
-            { onConflict: "user_id" }
-          );
+        await syncAuditorRecord(id, email, firstName, lastName);
       }
     }
 
