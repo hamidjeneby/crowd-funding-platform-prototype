@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Upload, Info, Check, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Upload, Info, Check, Eye, EyeOff, Loader2, CheckCircle2, Lock } from "lucide-react";
 import { saveStage3Doc, updateDocPassword } from "@/app/actions/investor-onboarding";
 import { useRouter } from "next/navigation";
 
@@ -11,7 +11,7 @@ const REQUIRED_DOCS = [
   { id: "income_evidence", label: "Evidence of Income/Net Worth", tooltip: "Upload bank statements or salary certificate" },
 ];
 
-export default function Stage2DocsIndiv({ docs, onUpdate, onNext, onBack }) {
+export default function Stage2DocsIndiv({ docs = [], onUpdate, onNext, onBack }) {
   const router = useRouter();
   const [files, setFiles] = useState({});
   const [passwords, setPasswords] = useState(() => {
@@ -32,7 +32,12 @@ export default function Stage2DocsIndiv({ docs, onUpdate, onNext, onBack }) {
     income_evidence: useRef(),
   };
 
-  const isUploaded = (docId) => docs.some(d => d.doc_type === docId);
+  const getExistingDoc = (docId) => docs.find((d) => d.doc_type === docId);
+
+  const isUploaded = (docId) => {
+    const d = getExistingDoc(docId);
+    return d && d.url && d.status !== "rejected";
+  };
 
   const handleFileChange = (docId, file) => {
     setDocError(null);
@@ -47,7 +52,10 @@ export default function Stage2DocsIndiv({ docs, onUpdate, onNext, onBack }) {
 
   const handleSaveAndContinue = async () => {
     setDocError(null);
-    const missing = REQUIRED_DOCS.filter(d => !files[d.id] && !isUploaded(d.id));
+    const missing = REQUIRED_DOCS.filter((d) => {
+      const existing = getExistingDoc(d.id);
+      return !files[d.id] && !isUploaded(d.id) && existing?.status !== "approved";
+    });
     
     if (missing.length > 0) {
       setDocError(`Please upload all required documents. Missing: ${missing.map(m => m.label).join(", ")}`);
@@ -59,7 +67,11 @@ export default function Stage2DocsIndiv({ docs, onUpdate, onNext, onBack }) {
       const uploadPromises = REQUIRED_DOCS.map(async (doc) => {
         const docId = doc.id;
         const file = files[docId];
+        const existing = getExistingDoc(docId);
         
+        // Skip modifying already approved docs
+        if (existing?.status === "approved") return;
+
         if (file) {
           const formData = new FormData();
           formData.append("doc_type", docId);
@@ -69,9 +81,8 @@ export default function Stage2DocsIndiv({ docs, onUpdate, onNext, onBack }) {
           }
           await saveStage3Doc(formData);
         } else if (isUploaded(docId)) {
-          const originalDoc = docs.find(d => d.doc_type === docId);
           const currentPassword = passwords[docId] || "";
-          const originalPassword = originalDoc?.document_password || "";
+          const originalPassword = existing?.document_password || "";
           
           if (currentPassword !== originalPassword) {
             await updateDocPassword(docId, currentPassword);
@@ -106,6 +117,9 @@ export default function Stage2DocsIndiv({ docs, onUpdate, onNext, onBack }) {
       <div className="space-y-6">
         <p className="text-sm text-red-500 font-medium">* Indicates a required field</p>
         {REQUIRED_DOCS.map(doc => {
+          const existingDoc = getExistingDoc(doc.id);
+          const isApproved = existingDoc?.status === "approved";
+          const isRejected = existingDoc?.status === "rejected";
           const uploaded = isUploaded(doc.id);
           const currentFile = files[doc.id];
           
@@ -133,6 +147,12 @@ export default function Stage2DocsIndiv({ docs, onUpdate, onNext, onBack }) {
                       </div>
                     )}
                   </div>
+
+                  {isRejected && existingDoc?.rejection_reason && (
+                    <div className="mt-2 text-xs text-red-700 bg-red-100/80 p-2.5 rounded-lg border border-red-200 font-semibold">
+                      Rejection Reason: {existingDoc.rejection_reason}. Please upload a replacement document.
+                    </div>
+                  )}
                   
                   <div className="mt-3 flex items-center gap-4">
                     <input 
@@ -141,18 +161,38 @@ export default function Stage2DocsIndiv({ docs, onUpdate, onNext, onBack }) {
                       ref={fileRefs[doc.id]} 
                       onChange={(e) => handleFileChange(doc.id, e.target.files[0])} 
                       className="hidden" 
+                      disabled={isApproved}
                     />
                     <button 
                       type="button" 
-                      onClick={() => fileRefs[doc.id].current.click()} 
-                      className="flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-100"
+                      disabled={isApproved}
+                      onClick={() => !isApproved && fileRefs[doc.id].current.click()} 
+                      className={`flex items-center px-4 py-2 border rounded-md shadow-sm text-sm font-medium ${
+                        isApproved
+                          ? "bg-gray-200/80 text-gray-500 border-gray-300 cursor-not-allowed opacity-75"
+                          : "text-gray-700 bg-white hover:bg-gray-100 border-gray-300"
+                      }`}
                     >
-                      <Upload size={16} className="mr-2" />
-                      {currentFile ? currentFile.name : (uploaded ? "Replace File" : "Select File")}
+                      {isApproved ? (
+                        <>
+                          <Lock size={16} className="mr-2 text-emerald-700" />
+                          Approved & Locked
+                        </>
+                      ) : (
+                        <>
+                          <Upload size={16} className="mr-2" />
+                          {currentFile ? currentFile.name : (uploaded ? "Replace File" : "Select File")}
+                        </>
+                      )}
                     </button>
                     {!currentFile && uploaded && (
                       <span className="text-sm text-green-600 flex items-center">
                         <Check size={16} className="mr-1"/> Uploaded
+                      </span>
+                    )}
+                    {isApproved && (
+                      <span className="text-xs text-emerald-800 font-bold bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 flex items-center gap-1">
+                        <CheckCircle2 size={14} className="text-emerald-600" /> Approved by Compliance
                       </span>
                     )}
                   </div>
@@ -164,14 +204,16 @@ export default function Stage2DocsIndiv({ docs, onUpdate, onNext, onBack }) {
                     <input 
                       type={showPasswords[doc.id] ? "text" : "password"} 
                       placeholder="If encrypted"
+                      disabled={isApproved}
                       value={passwords[doc.id] || ""}
                       onChange={(e) => setPasswords(prev => ({ ...prev, [doc.id]: e.target.value }))}
-                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-[#064e3b] focus:ring-[#064e3b] sm:text-sm p-2 pr-10 border" 
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-[#064e3b] focus:ring-[#064e3b] sm:text-sm p-2 pr-10 border disabled:bg-gray-200/50 disabled:cursor-not-allowed" 
                     />
                     <button 
                       type="button"
+                      disabled={isApproved}
                       onClick={() => setShowPasswords(prev => ({ ...prev, [doc.id]: !prev[doc.id] }))}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 disabled:opacity-40"
                     >
                       {showPasswords[doc.id] ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>

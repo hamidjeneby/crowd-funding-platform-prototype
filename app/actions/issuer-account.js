@@ -73,6 +73,7 @@ export async function getIssuerAccountData() {
         onboarding_status: issuer.onboarding_status || "incomplete",
         bank_details: bankDetails,
         bank_verification_status: issuer.bank_verification_status || "pending",
+        bank_verification_rejection_reason: issuer.bank_verification_rejection_reason || null,
         representatives: decryptedReps,
       },
     };
@@ -121,6 +122,7 @@ export async function updateIssuerBankDetails(bankDetailsData) {
       .update({
         bank_details: newBankDetails,
         bank_verification_status: "pending",
+        bank_verification_rejection_reason: null,
       })
       .eq("id", issuer.id);
 

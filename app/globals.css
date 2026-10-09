@@ -22,6 +22,12 @@ body {
   font-family: var(--font-outfit);
 }
 
+button,
+[role="button"] {
+  cursor: pointer;
+}
+
+
 @layer utilities {
   .glass {
     background: rgba(253, 251, 247, 0.7);

@@ -523,6 +523,10 @@ export async function saveStage3Doc(formData) {
       .update({
         document_password: password ? encrypt(password) : null,
         url: fileUrl,
+        status: "pending",
+        rejection_reason: null,
+        reviewed_at: null,
+        reviewed_by: null,
         uploaded_at: new Date().toISOString(),
       })
       .eq("id", existing.id);
@@ -535,18 +539,13 @@ export async function saveStage3Doc(formData) {
         document_password: password ? encrypt(password) : null,
         url: fileUrl,
         status: "pending",
+        rejection_reason: null,
+        reviewed_at: null,
+        reviewed_by: null,
         uploaded_at: new Date().toISOString(),
       },
     ]);
     if (error) throw new Error("Failed to insert document.");
-  }
-
-  if (docType === "trade_certificate") {
-    const targetEq = isInstitutional && orgId ? { org_id: orgId } : { user_id: userId };
-    await supabaseAdmin
-      .from("investors")
-      .update({ license_verification_status: "pending" })
-      .match(targetEq);
   }
 
   revalidatePath("/investor-portal/onboarding");
@@ -619,6 +618,7 @@ export async function saveStage4Banking(bankDetails) {
     .update({
       bank_details: { ...bankDetails, iban: encrypt(bankDetails.iban) },
       bank_verification_status: "pending",
+      bank_verification_rejection_reason: null,
     })
     .match(targetEq);
 
@@ -660,6 +660,7 @@ export async function submitApplication() {
     .from("investors")
     .update({
       onboarding_status: "pending review",
+      review_notes: null,
       consent_timestamp: new Date().toISOString(),
       consent_ip: ip,
       consent_user_profile: userAgent,

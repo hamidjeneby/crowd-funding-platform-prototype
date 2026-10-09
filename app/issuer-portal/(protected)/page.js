@@ -53,11 +53,11 @@ export default async function IssuerPortalDashboard() {
 
     // Calculate project counts by status
     liveCampaignsCount = rawProjects.filter(
-      (p) => p.status === "campaign_live"
+      (p) => p.status === "campaign_live",
     ).length;
     draftCount = rawProjects.filter((p) => p.status === "draft").length;
     underReviewCount = rawProjects.filter(
-      (p) => p.status === "pending_review"
+      (p) => p.status === "pending_review",
     ).length;
 
     // 2. Fetch all pledges across all issuer's projects for lifetime raised capital calculation
@@ -73,13 +73,13 @@ export default async function IssuerPortalDashboard() {
       // Lifetime capital raised: SUM(allocated_amount || pledged_amount) where status IN (allocated, active, completed)
       const validLifetimePledges = allPledges.filter((p) =>
         ["allocated", "active", "completed"].includes(
-          (p.status || "").toLowerCase()
-        )
+          (p.status || "").toLowerCase(),
+        ),
       );
 
       lifetimeCapitalRaised = validLifetimePledges.reduce(
         (sum, p) => sum + Number(p.allocated_amount || p.pledged_amount || 0),
-        0
+        0,
       );
 
       // Fetch live raised totals for snapshot cards
@@ -126,12 +126,14 @@ export default async function IssuerPortalDashboard() {
             {/* Onboarding Status Badge if not completed */}
             {!isFullyCompleted && (
               <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-900 font-extrabold text-xs border border-amber-300 flex items-center gap-1.5 capitalize">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" /> KYB Status: {onboardingStatus}
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" /> KYB
+                Status: {onboardingStatus}
               </span>
             )}
             {isFullyCompleted && (
               <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 font-extrabold text-xs border border-emerald-300 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> KYB Approved
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> KYB
+                Approved
               </span>
             )}
           </div>
@@ -140,7 +142,8 @@ export default async function IssuerPortalDashboard() {
             Issuer Executive Dashboard
           </h1>
           <p className="text-sm text-[#064e3b]/70 mt-0.5">
-            Lifetime capital metrics, active project pipeline, and project management snapshots.
+            Lifetime capital metrics, active project pipeline, and project
+            management snapshots.
           </p>
         </div>
 
@@ -176,10 +179,11 @@ export default async function IssuerPortalDashboard() {
             </div>
           </div>
           <div className="text-3xl font-extrabold text-[#064e3b]">
-            USD {lifetimeCapitalRaised.toLocaleString()}
+            AED {lifetimeCapitalRaised.toLocaleString()}
           </div>
           <p className="text-xs text-emerald-700 font-semibold flex items-center gap-1">
-            <CheckCircle2 className="w-3.5 h-3.5 text-[#059669]" /> Lifetime allocated capital
+            <CheckCircle2 className="w-3.5 h-3.5 text-[#059669]" /> Lifetime
+            allocated capital
           </p>
         </div>
 
@@ -243,10 +247,12 @@ export default async function IssuerPortalDashboard() {
         <div className="flex items-center justify-between border-b border-gray-100 pb-4">
           <div>
             <h2 className="text-xl font-bold text-[#064e3b] flex items-center gap-2">
-              <FolderOpen className="w-5 h-5 text-[#059669]" /> Live Projects Snapshot
+              <FolderOpen className="w-5 h-5 text-[#059669]" /> Live Projects
+              Snapshot
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              Recent projects pipeline with funding progress and quick access to project management.
+              Recent projects pipeline with funding progress and quick access to
+              project management.
             </p>
           </div>
 
@@ -254,16 +260,20 @@ export default async function IssuerPortalDashboard() {
             href="/issuer-portal/projects"
             className="text-xs font-bold text-[#059669] hover:underline flex items-center gap-1"
           >
-            View All Projects ({projects.length}) <ChevronRight className="w-4 h-4" />
+            View All Projects ({projects.length}){" "}
+            <ChevronRight className="w-4 h-4" />
           </Link>
         </div>
 
         {recentProjects.length === 0 ? (
           <div className="p-12 text-center text-xs text-gray-500 bg-[#fcfaf7] rounded-2xl border border-dashed border-gray-200 space-y-3">
             <Building2 className="w-10 h-10 text-gray-300 mx-auto" />
-            <p className="font-semibold text-gray-700 text-sm">No Projects Created Yet</p>
+            <p className="font-semibold text-gray-700 text-sm">
+              No Projects Created Yet
+            </p>
             <p className="max-w-md mx-auto">
-              Start by creating your first project draft to raise capital on the marketplace.
+              Start by creating your first project draft to raise capital on the
+              marketplace.
             </p>
             <Link
               href="/issuer-portal/projects/new"
@@ -297,7 +307,7 @@ export default async function IssuerPortalDashboard() {
                     <div className="flex items-center justify-between">
                       <span
                         className={`px-2.5 py-0.5 text-[10px] font-extrabold rounded-full border uppercase tracking-wider ${getStatusBadgeStyle(
-                          status
+                          status,
                         )}`}
                       >
                         {status.replace("_", " ")}

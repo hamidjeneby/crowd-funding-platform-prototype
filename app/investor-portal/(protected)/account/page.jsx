@@ -25,6 +25,7 @@ import {
   Users,
   Pencil,
   RotateCcw,
+  Lock,
 } from "lucide-react";
 
 const bankSchema = z.object({
@@ -373,6 +374,22 @@ export default function AccountAndBankingPage() {
               </div>
             )}
 
+            {bankStatus === "rejected" && (
+              <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-900 text-xs space-y-1.5">
+                <div className="flex items-center gap-2 font-bold text-red-950">
+                  <XCircle className="w-4 h-4 text-red-600 flex-shrink-0" /> Bank Verification Rejected
+                </div>
+                {profile?.bank_verification_rejection_reason && (
+                  <p className="leading-relaxed">
+                    <strong>Reason:</strong> {profile.bank_verification_rejection_reason}
+                  </p>
+                )}
+                <p className="text-[11px] text-red-700">
+                  Updating your bank account details below will resubmit them to the compliance team for review.
+                </p>
+              </div>
+            )}
+
             {/* VIEW ONLY MODE */}
             {!isEditingBank ? (
               <div className="space-y-5 text-xs">
@@ -435,13 +452,19 @@ export default function AccountAndBankingPage() {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleStartEdit}
-                  className="w-full py-3 rounded-xl bg-[#064e3b] text-white font-bold hover:bg-[#047857] transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Pencil className="w-4 h-4" /> Edit Bank Details
-                </button>
+                {bankStatus === "approved" || bankStatus === "verified" ? (
+                  <div className="w-full py-3 rounded-xl bg-gray-100 border border-gray-200 text-gray-500 font-bold text-center flex items-center justify-center gap-2 text-xs">
+                    <Lock className="w-4 h-4 text-emerald-600" /> Bank Details Approved & Locked
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleStartEdit}
+                    className="w-full py-3 rounded-xl bg-[#064e3b] text-white font-bold hover:bg-[#047857] transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Pencil className="w-4 h-4" /> Edit Bank Details
+                  </button>
+                )}
               </div>
             ) : (
               /* EDIT MODE: WARNING BANNER APPEARS HERE */

@@ -20,7 +20,8 @@ export default async function ProtectedIssuerLayout({ children }) {
     .eq("org_id", orgId)
     .maybeSingle();
 
-  const isFullyOnboarded = issuer?.onboarding_status && issuer.onboarding_status !== "incomplete";
+  const rawStatus = (issuer?.onboarding_status || "").toLowerCase().trim();
+  const isFullyOnboarded = rawStatus === "completed" || rawStatus === "approved";
 
   if (!isFullyOnboarded) {
     redirect("/issuer-portal/onboarding");

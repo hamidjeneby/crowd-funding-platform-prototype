@@ -9,8 +9,10 @@ export default function Footer() {
   if (
     pathname?.startsWith("/investor-portal") ||
     pathname?.startsWith("/issuer-portal") ||
+    pathname?.startsWith("/auditor-portal") ||
     pathname?.startsWith("/investor") ||
-    pathname?.startsWith("/issuer")
+    pathname?.startsWith("/issuer") ||
+    pathname?.startsWith("/auditor")
   ) {
     return null;
   }

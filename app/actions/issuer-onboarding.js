@@ -393,6 +393,10 @@ export async function saveStage3Doc(formData) {
       .update({
         document_password: password ? encrypt(password) : null,
         url: fileUrl,
+        status: "pending",
+        rejection_reason: null,
+        reviewed_at: null,
+        reviewed_by: null,
         uploaded_at: new Date().toISOString(),
       })
       .eq("id", existing.id);
@@ -405,6 +409,9 @@ export async function saveStage3Doc(formData) {
         document_password: password ? encrypt(password) : null,
         url: fileUrl,
         status: "pending",
+        rejection_reason: null,
+        reviewed_at: null,
+        reviewed_by: null,
         uploaded_at: new Date().toISOString(),
       },
     ]);
@@ -448,6 +455,7 @@ export async function saveStage4Banking(bankDetails) {
     .update({
       bank_details: { ...bankDetails, iban: encrypt(bankDetails.iban) },
       bank_verification_status: "pending",
+      bank_verification_rejection_reason: null,
     })
     .eq("org_id", orgId);
 
@@ -468,6 +476,7 @@ export async function submitApplication() {
     .from("issuers")
     .update({
       onboarding_status: "pending review",
+      review_notes: null,
       consent_timestamp: new Date().toISOString(),
       consent_ip: ip,
       consent_user_profile: userAgent,

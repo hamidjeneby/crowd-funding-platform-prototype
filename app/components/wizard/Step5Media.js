@@ -16,7 +16,7 @@ import {
   getSignedUrlsForMedia,
   updateMediaOrder,
 } from "@/app/actions/upload";
-import { Loader2, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw, AlertCircle } from "lucide-react";
 import { useUpload } from "@/app/components/wizard/UploadProvider";
 
 export default function Step5Media({
@@ -36,12 +36,16 @@ export default function Step5Media({
   const initialItems = [];
 
   if (initialData?.cover_image_url) {
+    const coverMediaRecord = initialData?.project_media?.find(m => m.url === initialData.cover_image_url);
+    const coverStatus = initialData?.cover_image_review_status || coverMediaRecord?.review_status;
     initialItems.push({
       media_id: "existing_cover",
       url: initialData.cover_image_url,
       media_type: "image",
       display_order: 0,
       isCover: true,
+      review_status: coverStatus,
+      rejection_reason: coverMediaRecord?.rejection_reason,
     });
   }
 
@@ -282,15 +286,19 @@ export default function Step5Media({
       }
 
       // Save step progress in backend and continue immediately
-      await updateProjectDraft(projectId, {}, 5);
+      const res = await updateProjectDraft(projectId, {}, 5);
 
       await onUpdate();
-      onNext();
+      onNext(res);
     } catch (err) {
       setError(err.message);
       setUploading(false);
     }
   };
+
+  const rejectedItemsCount = items.filter(
+    (i) => i.review_status === "rejected" && !i.isStaged,
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -299,6 +307,17 @@ export default function Step5Media({
         The first image is your Cover Image. You can drag and drop the media
         cards below to rearrange their display order.
       </p>
+
+      {rejectedItemsCount > 0 && (
+        <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-900 text-xs font-semibold flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+          <span>
+            {rejectedItemsCount === 1
+              ? "1 media file (or cover image) was rejected during auditor review. Please click Replace File below to upload a replacement."
+              : `${rejectedItemsCount} media files (or cover image) were rejected during auditor review. Please click Replace File below to upload replacements.`}
+          </span>
+        </div>
+      )}
 
       {error && (
         <p className="text-red-500 font-medium bg-red-50 p-3 rounded-md">
@@ -421,8 +440,11 @@ function SortableItem({
   onRetry,
   onReplace,
 }) {
+  const isApproved = item.review_status === "approved";
+  const isRejected = item.review_status === "rejected";
+
   const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id: item.media_id, disabled: disabled || idx === 0 });
+    useSortable({ id: item.media_id, disabled: disabled || idx === 0 || isApproved });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -435,10 +457,10 @@ function SortableItem({
       style={style}
       className={`p-3 border rounded-md flex justify-between items-center bg-white ${
         idx === 0 ? "border-[#064e3b] bg-[#064e3b]/5" : ""
-      }`}
+      } ${isRejected && !item.isStaged ? "border-red-300 bg-red-50/40" : ""}`}
     >
       <div className="flex items-center space-x-4 flex-1 mr-4">
-        {!disabled && idx !== 0 && (
+        {!disabled && idx !== 0 && !isApproved && (
           <div
             {...attributes}
             {...listeners}
@@ -465,7 +487,7 @@ function SortableItem({
               {uploadState.status === "error"
                 ? "Upload Failed"
                 : uploadState.status === "success"
-                  ? "Uploaded Successfully"
+                  ? "Uploaded Successfully (Pending Review)"
                   : "Uploading in background..."}
             </span>
             {uploadState.status === "error" && (
@@ -488,7 +510,27 @@ function SortableItem({
               <span className="text-gray-700">
                 {item.media_type.toUpperCase()}
               </span>
+              {isApproved && (
+                <span className="text-xs font-semibold text-green-800 bg-green-100 border border-green-200 px-2 py-0.5 rounded">
+                  Approved
+                </span>
+              )}
+              {isRejected && !item.isStaged && (
+                <span className="text-xs font-semibold text-red-800 bg-red-100 border border-red-200 px-2 py-0.5 rounded">
+                  Rejected by Auditor – Replace Required
+                </span>
+              )}
             </div>
+            {isRejected && !item.isStaged && (
+              <span className="text-xs text-red-700 font-semibold block mt-1">
+                File was rejected by auditor. Please click Replace File to upload a new version.
+                {item.rejection_reason && (
+                  <span className="block text-[11px] font-normal text-red-600 mt-0.5">
+                    <strong>Auditor Note:</strong> {item.rejection_reason}
+                  </span>
+                )}
+              </span>
+            )}
             {item.isStaged && (
               <span className="text-xs text-gray-500 mt-0.5">
                 Staged for upload
@@ -498,7 +540,7 @@ function SortableItem({
         )}
       </div>
 
-      {!disabled && (
+      {!disabled && !isApproved && (
         <div className="flex gap-2 items-center">
           {uploadState?.status === "error" && (
             <button
@@ -511,8 +553,8 @@ function SortableItem({
           )}
           {!uploadState && (
             <>
-              <label className="cursor-pointer text-xs text-gray-700 border border-gray-300 bg-white px-2 py-1 rounded hover:bg-gray-50">
-                Replace
+              <label className={`cursor-pointer text-xs font-semibold px-2.5 py-1 rounded transition-all ${isRejected && !item.isStaged ? "bg-red-600 hover:bg-red-700 text-white shadow-xs" : "text-gray-700 border border-gray-300 bg-white hover:bg-gray-50"}`}>
+                {isRejected && !item.isStaged ? "Replace File" : "Replace"}
                 <input
                   type="file"
                   accept="image/*,video/*"
@@ -531,6 +573,13 @@ function SortableItem({
               </button>
             </>
           )}
+        </div>
+      )}
+      {isApproved && (
+        <div className="flex items-center">
+          <span className="text-xs font-semibold text-green-800 bg-green-100 border border-green-200 px-2.5 py-1 rounded">
+            Approved (Locked)
+          </span>
         </div>
       )}
     </div>

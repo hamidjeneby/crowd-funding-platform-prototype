@@ -18,6 +18,7 @@ import {
   ExternalLink,
   ShieldCheck,
   Loader2,
+  XCircle,
 } from "lucide-react";
 import {
   getIssuerAccountData,
@@ -41,7 +42,7 @@ const bankDetailsSchema = z.object({
     .min(8, "SWIFT code must be at least 8 characters")
     .regex(
       /^[A-Z0-9]+$/,
-      "SWIFT code must contain only uppercase letters and numbers"
+      "SWIFT code must contain only uppercase letters and numbers",
     ),
   bank_address: z.string().min(5, "Bank address is required"),
   currency: z.string().min(3, "Currency must be selected"),
@@ -113,7 +114,7 @@ export default function IssuerAccountPage() {
       if (res.success) {
         setIsEditingBank(false);
         setSaveMessage(
-          "Bank details updated successfully! Bank verification status has been set to Pending for compliance review."
+          "Bank details updated successfully! Updated bank details have been sent for compliance review.",
         );
         await loadAccountData();
         setTimeout(() => setSaveMessage(""), 7000);
@@ -154,7 +155,8 @@ export default function IssuerAccountPage() {
             Account & Banking
           </h1>
           <p className="text-sm text-[#064e3b]/70 mt-0.5">
-            Verified corporate KYB details, authorized representative credentials, and settlement bank accounts.
+            Verified corporate KYB details, authorized representative
+            credentials, and settlement bank accounts.
           </p>
         </div>
       </div>
@@ -185,14 +187,16 @@ export default function IssuerAccountPage() {
                 Corporate KYB Information
               </h3>
               <p className="text-xs text-gray-500">
-                Verified organization identity and incorporation data (Read-Only).
+                Verified organization identity and incorporation data
+                (Read-Only).
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <span className="px-3 py-1.5 rounded-full bg-emerald-100 text-[#064e3b] border border-emerald-200 text-xs font-bold flex items-center gap-1.5">
-              <CheckCircle2 className="w-4 h-4 text-[#059669]" /> KYB Status: {issuerData?.onboarding_status || "Completed"}
+              <CheckCircle2 className="w-4 h-4 text-[#059669]" /> KYB Status:{" "}
+              {issuerData?.onboarding_status || "Completed"}
             </span>
             <span className="px-2.5 py-1 rounded-full bg-gray-100 text-gray-500 text-[10px] font-bold flex items-center gap-1 border border-gray-200">
               <Lock className="w-3 h-3" /> Locked
@@ -202,56 +206,72 @@ export default function IssuerAccountPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 text-xs">
           <div className="p-4 rounded-2xl bg-[#fdfbf7] border border-emerald-100 space-y-1">
-            <span className="text-gray-400 font-medium block">Legal Entity Name</span>
+            <span className="text-gray-400 font-medium block">
+              Legal Entity Name
+            </span>
             <span className="font-bold text-[#064e3b] text-sm block">
               {issuerData?.legal_entity_name || "N/A"}
             </span>
           </div>
 
           <div className="p-4 rounded-2xl bg-[#fdfbf7] border border-emerald-100 space-y-1">
-            <span className="text-gray-400 font-medium block">Trade License Number</span>
+            <span className="text-gray-400 font-medium block">
+              Trade License Number
+            </span>
             <span className="font-bold font-mono text-[#064e3b] text-sm block">
               {issuerData?.trade_license_number || "N/A"}
             </span>
           </div>
 
           <div className="p-4 rounded-2xl bg-[#fdfbf7] border border-emerald-100 space-y-1">
-            <span className="text-gray-400 font-medium block">Licensing Authority</span>
+            <span className="text-gray-400 font-medium block">
+              Licensing Authority
+            </span>
             <span className="font-bold text-[#064e3b] text-sm block">
               {issuerData?.license_authority || "N/A"}
             </span>
           </div>
 
           <div className="p-4 rounded-2xl bg-[#fdfbf7] border border-emerald-100 space-y-1">
-            <span className="text-gray-400 font-medium block">Business Structure / Type</span>
+            <span className="text-gray-400 font-medium block">
+              Business Structure / Type
+            </span>
             <span className="font-bold text-[#064e3b] text-sm block">
               {issuerData?.business_type || "N/A"}
             </span>
           </div>
 
           <div className="p-4 rounded-2xl bg-[#fdfbf7] border border-emerald-100 space-y-1">
-            <span className="text-gray-400 font-medium block">Country of Incorporation</span>
+            <span className="text-gray-400 font-medium block">
+              Country of Incorporation
+            </span>
             <span className="font-bold text-[#064e3b] text-sm block">
               {issuerData?.country || "N/A"}
             </span>
           </div>
 
           <div className="p-4 rounded-2xl bg-[#fdfbf7] border border-emerald-100 space-y-1">
-            <span className="text-gray-400 font-medium block">City / Emirate</span>
+            <span className="text-gray-400 font-medium block">
+              City / Emirate
+            </span>
             <span className="font-bold text-[#064e3b] text-sm block">
               {issuerData?.city || "N/A"}
             </span>
           </div>
 
           <div className="p-4 rounded-2xl bg-[#fdfbf7] border border-emerald-100 space-y-1">
-            <span className="text-gray-400 font-medium block">Corporate Business Email</span>
+            <span className="text-gray-400 font-medium block">
+              Corporate Business Email
+            </span>
             <span className="font-bold font-mono text-[#064e3b] text-sm block">
               {issuerData?.business_email || "N/A"}
             </span>
           </div>
 
           <div className="p-4 rounded-2xl bg-[#fdfbf7] border border-emerald-100 space-y-1">
-            <span className="text-gray-400 font-medium block">Corporate Business Phone</span>
+            <span className="text-gray-400 font-medium block">
+              Corporate Business Phone
+            </span>
             <span className="font-bold font-mono text-[#064e3b] text-sm block">
               {issuerData?.business_phone_number || "N/A"}
             </span>
@@ -271,7 +291,8 @@ export default function IssuerAccountPage() {
                 Authorized Representative Details
               </h3>
               <p className="text-xs text-gray-500">
-                Verified corporate signatories, directors, and ultimate beneficial owners (Read-Only).
+                Verified corporate signatories, directors, and ultimate
+                beneficial owners (Read-Only).
               </p>
             </div>
           </div>
@@ -336,11 +357,17 @@ export default function IssuerAccountPage() {
 
                 <div className="grid grid-cols-2 gap-2 text-gray-600 text-xs pt-1">
                   <div>
-                    <span className="text-gray-400 block text-[11px]">ID Type</span>
-                    <span className="font-semibold text-gray-900">{rep.id_type || "N/A"}</span>
+                    <span className="text-gray-400 block text-[11px]">
+                      ID Type
+                    </span>
+                    <span className="font-semibold text-gray-900">
+                      {rep.id_type || "N/A"}
+                    </span>
                   </div>
                   <div>
-                    <span className="text-gray-400 block text-[11px]">ID Number</span>
+                    <span className="text-gray-400 block text-[11px]">
+                      ID Number
+                    </span>
                     <span className="font-semibold font-mono text-gray-900">
                       {rep.id_number || "N/A"}
                     </span>
@@ -364,32 +391,81 @@ export default function IssuerAccountPage() {
                 Settlement Bank Account
               </h3>
               <p className="text-xs text-gray-500">
-                Primary organization bank account for distributions and payouts (Editable).
+                Primary organization bank account for distributions and payouts
+                (Editable).
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
             {bankStatus === "approved" || bankStatus === "verified" ? (
-              <span className="px-3 py-1.5 rounded-full bg-emerald-100 text-[#064e3b] border border-emerald-200 text-xs font-bold flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-[#059669]" /> Bank Approved
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1.5 rounded-full bg-emerald-100 text-[#064e3b] border border-emerald-200 text-xs font-bold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-[#059669]" /> Bank
+                  Approved
+                </span>
+                {!isEditingBank && (
+                  <button
+                    onClick={() => setIsEditingBank(true)}
+                    className="px-4 py-2 rounded-xl bg-[#064e3b] hover:bg-[#047857] text-white font-bold text-xs transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Edit className="w-3.5 h-3.5" /> Edit Bank Details
+                  </button>
+                )}
+              </div>
+            ) : bankStatus === "rejected" ? (
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1.5 rounded-full bg-red-100 text-red-800 border border-red-200 text-xs font-bold flex items-center gap-1.5">
+                  <XCircle className="w-4 h-4 text-red-600" /> Verification
+                  Rejected
+                </span>
+                {!isEditingBank && (
+                  <button
+                    onClick={() => setIsEditingBank(true)}
+                    className="px-4 py-2 rounded-xl bg-red-700 hover:bg-red-800 text-white font-bold text-xs transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Edit className="w-3.5 h-3.5" /> Fix Bank Details
+                  </button>
+                )}
+              </div>
             ) : (
-              <span className="px-3 py-1.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold flex items-center gap-1.5">
-                <Clock className="w-4 h-4 text-amber-600" /> Pending Verification
-              </span>
-            )}
-
-            {!isEditingBank && (
-              <button
-                onClick={() => setIsEditingBank(true)}
-                className="px-4 py-2 rounded-xl bg-[#064e3b] hover:bg-[#047857] text-white font-bold text-xs transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
-              >
-                <Edit className="w-3.5 h-3.5" /> Edit Bank Details
-              </button>
+              <>
+                <span className="px-3 py-1.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-amber-600" /> Pending
+                  Verification
+                </span>
+                {!isEditingBank && (
+                  <button
+                    onClick={() => setIsEditingBank(true)}
+                    className="px-4 py-2 rounded-xl bg-[#064e3b] hover:bg-[#047857] text-white font-bold text-xs transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Edit className="w-3.5 h-3.5" /> Edit Bank Details
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
+
+        {bankStatus === "rejected" && (
+          <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-900 text-xs space-y-1.5">
+            <div className="flex items-center gap-2 font-bold text-red-950">
+              <XCircle className="w-4 h-4 text-red-600 flex-shrink-0" />{" "}
+              Settlement Bank Verification Rejected
+            </div>
+            {issuerData?.bank_verification_rejection_reason && (
+              <p className="leading-relaxed">
+                <strong>Reason:</strong>{" "}
+                {issuerData.bank_verification_rejection_reason}
+              </p>
+            )}
+            <p className="text-[11px] text-red-700">
+              Please click &quot;Fix Bank Details&quot; below to correct your
+              settlement account information. Saving changes will resubmit your
+              details for compliance review.
+            </p>
+          </div>
+        )}
 
         {isEditingBank ? (
           <form onSubmit={handleSubmit(handleSaveBank)} className="space-y-6">
@@ -412,7 +488,8 @@ export default function IssuerAccountPage() {
 
               <div>
                 <label className="block font-medium text-gray-700 mb-1">
-                  Account Name (Beneficiary) <span className="text-red-500">*</span>
+                  Account Name (Beneficiary){" "}
+                  <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -515,7 +592,9 @@ export default function IssuerAccountPage() {
             <div className="p-4 rounded-xl bg-amber-50 text-amber-900 text-xs font-semibold flex items-center gap-2 border border-amber-200">
               <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
               <span>
-                Saving changes will update your bank account details and reset your bank verification status back to Pending for compliance verification.
+                Saving changes will update your bank account details and reset
+                your bank verification status back to Pending for compliance
+                verification.
               </span>
             </div>
 
@@ -556,28 +635,38 @@ export default function IssuerAccountPage() {
             </div>
 
             <div className="p-4 rounded-2xl bg-[#fdfbf7] border border-teal-100 space-y-1">
-              <span className="text-gray-400 font-medium block">Account Holder Name</span>
+              <span className="text-gray-400 font-medium block">
+                Account Holder Name
+              </span>
               <span className="font-bold text-[#064e3b] text-sm block">
-                {bankDetails.account_name || bankDetails.accountHolderName || "Not set"}
+                {bankDetails.account_name ||
+                  bankDetails.accountHolderName ||
+                  "Not set"}
               </span>
             </div>
 
             <div className="p-4 rounded-2xl bg-[#fdfbf7] border border-teal-100 space-y-1">
-              <span className="text-gray-400 font-medium block">Account Number</span>
+              <span className="text-gray-400 font-medium block">
+                Account Number
+              </span>
               <span className="font-bold font-mono text-[#064e3b] text-sm block">
                 {bankDetails.account_number || "Not set"}
               </span>
             </div>
 
             <div className="p-4 rounded-2xl bg-[#fdfbf7] border border-teal-100 space-y-1">
-              <span className="text-gray-400 font-medium block">IBAN Number</span>
+              <span className="text-gray-400 font-medium block">
+                IBAN Number
+              </span>
               <span className="font-bold font-mono text-[#064e3b] text-sm block uppercase">
                 {bankDetails.iban || "Not set"}
               </span>
             </div>
 
             <div className="p-4 rounded-2xl bg-[#fdfbf7] border border-teal-100 space-y-1">
-              <span className="text-gray-400 font-medium block">SWIFT / BIC Code</span>
+              <span className="text-gray-400 font-medium block">
+                SWIFT / BIC Code
+              </span>
               <span className="font-bold font-mono text-[#064e3b] text-sm block uppercase">
                 {bankDetails.swift_code || bankDetails.swiftCode || "Not set"}
               </span>
@@ -591,7 +680,9 @@ export default function IssuerAccountPage() {
             </div>
 
             <div className="md:col-span-2 lg:col-span-3 p-4 rounded-2xl bg-[#fdfbf7] border border-teal-100 space-y-1">
-              <span className="text-gray-400 font-medium block">Bank Address</span>
+              <span className="text-gray-400 font-medium block">
+                Bank Address
+              </span>
               <span className="font-bold text-[#064e3b] text-sm block">
                 {bankDetails.bank_address || "Not set"}
               </span>

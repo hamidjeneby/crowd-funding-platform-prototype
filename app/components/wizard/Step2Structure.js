@@ -4,8 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { updateProjectDraft } from "@/app/actions/projects";
-import { HelpCircle } from "lucide-react";
+import { HelpCircle, ShieldCheck } from "lucide-react";
 
 const PREDEFINED_AUTHORITIES = ["DIFC", "ADGM", "LABUAN_IBFC"];
 
@@ -167,6 +166,7 @@ export default function Step2Structure({
   onNext,
   onPrev,
   disabled,
+  isShariahApproved,
   onUpdate,
 }) {
   const [loading, setLoading] = useState(false);
@@ -262,9 +262,9 @@ export default function Step2Structure({
         registration_authority: finalAuthority,
       };
 
-      await updateProjectDraft(projectId, payload, 2);
+      const res = await updateProjectDraft(projectId, payload, 2);
       await onUpdate();
-      onNext();
+      onNext(res);
     } catch (err) {
       setError(err.message || "Failed to save");
     } finally {
@@ -272,9 +272,25 @@ export default function Step2Structure({
     }
   };
 
+  const isStructureLocked = disabled || isShariahApproved;
+
+  const handleFormSubmit = isStructureLocked
+    ? (e) => {
+        e.preventDefault();
+        onNext();
+      }
+    : handleSubmit(onSubmit);
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-      <h2 className="text-xl font-semibold">Structure & Compliance</h2>
+    <form onSubmit={handleFormSubmit} className="space-y-6">
+      <h2 className="text-xl font-semibold">Structure &amp; Compliance</h2>
+
+      {isShariahApproved && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>This campaign is marked as Shariah Compliant (Approved). Shariah contract type and structure details are locked from editing.</span>
+        </div>
+      )}
 
       {error && <p className="text-red-500">{error}</p>}
 
@@ -284,7 +300,7 @@ export default function Step2Structure({
         </label>
         <select
           {...register("sharia_contract_type")}
-          disabled={disabled}
+          disabled={isStructureLocked}
           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border bg-white"
         >
           <option value="">Select a type...</option>
@@ -334,7 +350,7 @@ export default function Step2Structure({
             </label>
             <input
               {...register("spv_legal_name")}
-              disabled={disabled}
+              disabled={isStructureLocked}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
             />
             {errors.spv_legal_name && (
@@ -349,7 +365,7 @@ export default function Step2Structure({
             </label>
             <select
               {...register("registration_authority")}
-              disabled={disabled}
+              disabled={isStructureLocked}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border bg-white"
             >
               <option value="">Select an authority...</option>
@@ -373,7 +389,7 @@ export default function Step2Structure({
                   type="text"
                   placeholder="e.g. BVI Financial Services Commission"
                   {...register("custom_registration_authority")}
-                  disabled={disabled}
+                  disabled={isStructureLocked}
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
                 />
                 {errors.custom_registration_authority && (
@@ -390,7 +406,7 @@ export default function Step2Structure({
             </label>
             <input
               {...register("registration_number")}
-              disabled={disabled}
+              disabled={isStructureLocked}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
             />
             {errors.registration_number && (
@@ -413,7 +429,7 @@ export default function Step2Structure({
                 step="1"
                 placeholder="e.g. 100000"
                 {...register("total_shares_authorized")}
-                disabled={disabled}
+                disabled={isStructureLocked}
                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
               />
               {errors.total_shares_authorized && (
@@ -432,7 +448,7 @@ export default function Step2Structure({
                   type="checkbox"
                   id="conversion_enabled"
                   {...register("conversion_enabled")}
-                  disabled={disabled}
+                  disabled={isStructureLocked}
                   className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
                 <label
@@ -476,7 +492,7 @@ export default function Step2Structure({
                   step="1"
                   placeholder="e.g. 100000"
                   {...register("total_shares_authorized")}
-                  disabled={disabled}
+                  disabled={isStructureLocked}
                   className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
                 />
                 {errors.total_shares_authorized && (
@@ -498,7 +514,7 @@ export default function Step2Structure({
                   step="any"
                   placeholder="0.00"
                   {...register("conversion_trigger_value")}
-                  disabled={disabled}
+                  disabled={isStructureLocked}
                   className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
                 />
                 {errors.conversion_trigger_value && (
@@ -520,7 +536,7 @@ export default function Step2Structure({
                     step="any"
                     placeholder="e.g. 10"
                     {...register("conversion_ratio_shares")}
-                    disabled={disabled}
+                    disabled={isStructureLocked}
                     className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
                   />
                   <span className="text-sm font-medium text-gray-600 whitespace-nowrap">
@@ -541,7 +557,7 @@ export default function Step2Structure({
                 <input
                   type="date"
                   {...register("conversion_deadline")}
-                  disabled={disabled}
+                  disabled={isStructureLocked}
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
                 />
                 {errors.conversion_deadline && (

@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { isValidIBAN } from "ibantools";
-import { Loader2 } from "lucide-react";
+import { Loader2, CheckCircle2, Lock } from "lucide-react";
 import { saveStage4Banking } from "@/app/actions/investor-onboarding";
 
 const bankingSchema = z.object({
@@ -24,6 +24,8 @@ export default function StageBanking({ data, onSave, onNext, onBack }) {
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
+
+  const isBankApproved = (data.bank_verification_status || "").toLowerCase() === "approved";
 
   let initialBankDetails = {};
   if (data.bank_details) {
@@ -44,6 +46,11 @@ export default function StageBanking({ data, onSave, onNext, onBack }) {
   });
 
   const onSubmit = async (formData) => {
+    if (isBankApproved) {
+      onNext();
+      return;
+    }
+
     setIsSaving(true);
     setFormError(null);
     setSuccessMsg(null);
@@ -65,6 +72,7 @@ export default function StageBanking({ data, onSave, onNext, onBack }) {
   };
 
   const onSaveDraft = async () => {
+    if (isBankApproved) return;
     const formData = watch();
     setIsSaving(true);
     setFormError(null);
@@ -88,6 +96,13 @@ export default function StageBanking({ data, onSave, onNext, onBack }) {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      {isBankApproved && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>Settlement bank details have been verified and approved by compliance. Editing is locked.</span>
+        </div>
+      )}
+
       {formError && (
         <div className="p-4 rounded-lg bg-red-50 text-red-700 text-sm border border-red-200">
           {formError}
@@ -101,8 +116,10 @@ export default function StageBanking({ data, onSave, onNext, onBack }) {
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-2">Banking Details</h3>
         <p className="text-sm text-gray-500 mb-6">Enter your primary bank account details. The IBAN will be validated instantly.</p>
-        <p className="text-sm text-red-500 font-medium">* Indicates a required field</p>
+        {!isBankApproved && <p className="text-sm text-red-500 font-medium">* Indicates a required field</p>}
       </div>
+
+      <fieldset disabled={isBankApproved} className="space-y-6 disabled:opacity-80">
 
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
         <div>
@@ -180,6 +197,7 @@ export default function StageBanking({ data, onSave, onNext, onBack }) {
           {errors.bank_address && <p className="mt-1 text-sm text-red-600">{errors.bank_address.message}</p>}
         </div>
       </div>
+      </fieldset>
 
       <div className="flex justify-between items-center pt-6 border-t border-gray-200">
         <button 
@@ -191,20 +209,22 @@ export default function StageBanking({ data, onSave, onNext, onBack }) {
           Back
         </button>
         <div className="space-x-4 flex">
-          <button 
-            type="button" 
-            onClick={onSaveDraft}
-            disabled={isSaving}
-            className="px-6 py-2 border border-[#064e3b] text-[#064e3b] rounded-md font-medium hover:bg-[#064e3b]/5 transition-colors disabled:opacity-50"
-          >
-            Save for Later
-          </button>
+          {!isBankApproved && (
+            <button 
+              type="button" 
+              onClick={onSaveDraft}
+              disabled={isSaving}
+              className="px-6 py-2 border border-[#064e3b] text-[#064e3b] rounded-md font-medium hover:bg-[#064e3b]/5 transition-colors disabled:opacity-50"
+            >
+              Save for Later
+            </button>
+          )}
           <button 
             type="submit" 
             disabled={isSaving}
             className="flex items-center px-6 py-2 bg-[#064e3b] text-white rounded-md font-medium hover:bg-[#064e3b]/90 transition-colors disabled:opacity-50"
           >
-            {isSaving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Saving...</> : "Save and Continue"}
+            {isBankApproved ? "Continue" : isSaving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Saving...</> : "Save and Continue"}
           </button>
         </div>
       </div>

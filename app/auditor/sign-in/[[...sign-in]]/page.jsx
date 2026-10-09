@@ -4,7 +4,7 @@ import { SignIn, useAuth, useUser } from "@clerk/nextjs";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
+import { ArrowLeft, ShieldCheck, UserCheck } from "lucide-react";
 
 export default function AuditorSignInPage() {
   const { isLoaded, isSignedIn } = useAuth();
@@ -66,6 +66,17 @@ export default function AuditorSignInPage() {
         {/* Center Content / Form */}
         <div className="flex flex-col items-center justify-center my-auto py-4 w-full">
           <div className="flex flex-col items-center max-w-md w-full mx-auto">
+            <style
+              dangerouslySetInnerHTML={{
+                __html: `
+                  .cl-footerAction,
+                  .cl-footerActionText,
+                  .cl-footerActionLink {
+                    display: none !important;
+                  }
+                `,
+              }}
+            />
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold uppercase tracking-wider mb-3">
               <UserCheck className="w-3.5 h-3.5 text-[#34d399]" /> Compliance & Auditor Access
             </span>
@@ -82,6 +93,13 @@ export default function AuditorSignInPage() {
               fallbackRedirectUrl="/auditor-portal"
               routing="path"
               path="/auditor/sign-in"
+              appearance={{
+                elements: {
+                  footerAction: "!hidden",
+                  footerActionText: "!hidden",
+                  footerActionLink: "!hidden",
+                },
+              }}
             />
           </div>
         </div>
@@ -105,18 +123,7 @@ export default function AuditorSignInPage() {
         <div className="absolute inset-y-0 left-0 w-24 bg-gradient-to-r from-[#02130e] via-[#02130e]/80 to-transparent pointer-events-none" />
         <div className="absolute inset-0 bg-gradient-to-t from-[#02130e] via-transparent to-[#02130e]/40 pointer-events-none" />
 
-        {/* Floating Highlight Card */}
-        <div className="absolute bottom-8 left-8 right-8 p-5 rounded-2xl bg-[#062c22]/80 border border-[#34d399]/20 backdrop-blur-md shadow-2xl z-20">
-          <div className="flex items-center gap-2 text-emerald-300 font-bold text-xs uppercase tracking-widest mb-1">
-            <Sparkles className="w-3.5 h-3.5 text-[#34d399]" /> Compliance & Oversight
-          </div>
-          <h2 className="text-base font-bold text-white mb-1">
-            Auditing & Risk Verification Center
-          </h2>
-          <p className="text-xs text-emerald-100/70 leading-relaxed">
-            Verify milestone completions, audit financial submissions, and clear offerings for investor release.
-          </p>
-        </div>
+
       </div>
     </div>
   );

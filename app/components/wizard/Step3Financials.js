@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { updateProjectDraft } from "@/app/actions/projects";
+import { ShieldCheck } from "lucide-react";
 
 const getYieldTypeForContract = (contractType) => {
   switch (contractType) {
@@ -131,6 +132,7 @@ export default function Step3Financials({
   onNext,
   onPrev,
   disabled,
+  isShariahApproved,
   onUpdate,
 }) {
   const [loading, setLoading] = useState(false);
@@ -217,9 +219,9 @@ export default function Step3Financials({
     };
 
     try {
-      await updateProjectDraft(projectId, finalData, 3);
+      const res = await updateProjectDraft(projectId, finalData, 3);
       await onUpdate();
-      onNext();
+      onNext(res);
     } catch (err) {
       setError(err.message || "Failed to save");
     } finally {
@@ -233,9 +235,25 @@ export default function Step3Financials({
       ? (currentUnitPrice / conversionRatioShares) * totalSharesAuthorized
       : null;
 
+  const isFinancialsLocked = disabled || isShariahApproved;
+
+  const handleFormSubmit = isFinancialsLocked
+    ? (e) => {
+        e.preventDefault();
+        onNext();
+      }
+    : handleSubmit(onSubmit);
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+    <form onSubmit={handleFormSubmit} className="space-y-6">
       <h2 className="text-xl font-semibold">Financial Terms</h2>
+
+      {isShariahApproved && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>This campaign is marked as Shariah Compliant (Approved). Financial terms and campaign goals are locked from editing.</span>
+        </div>
+      )}
 
       {error && <p className="text-red-500">{error}</p>}
 
@@ -269,7 +287,7 @@ export default function Step3Financials({
           <label className="block text-sm font-medium text-gray-700">Currency</label>
           <select
             {...register("currency")}
-            disabled={disabled}
+            disabled={isFinancialsLocked}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border bg-white"
           >
             <option value="">Select currency...</option>
@@ -296,7 +314,7 @@ export default function Step3Financials({
                 type="number"
                 step="any"
                 {...register("unit_price")}
-                disabled={disabled}
+                disabled={isFinancialsLocked}
                 className="block w-full rounded-none rounded-l-md border-gray-300 focus:border-blue-500 focus:ring-blue-500 p-2 border"
                 placeholder="0.00"
               />
@@ -329,7 +347,7 @@ export default function Step3Financials({
           <input
             type="number"
             {...register("soft_cap")}
-            disabled={disabled}
+            disabled={isFinancialsLocked}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
           />
           {errors.soft_cap && <p className="mt-1 text-sm text-red-600">{errors.soft_cap.message}</p>}
@@ -358,7 +376,7 @@ export default function Step3Financials({
             step="1"
             placeholder="e.g. 1000"
             {...register("min_investment_floor")}
-            disabled={disabled}
+            disabled={isFinancialsLocked}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
           />
           {errors.min_investment_floor && <p className="mt-1 text-sm text-red-600">{errors.min_investment_floor.message}</p>}
@@ -369,7 +387,7 @@ export default function Step3Financials({
           <input
             type="datetime-local"
             {...register("campaign_end_date")}
-            disabled={disabled}
+            disabled={isFinancialsLocked}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border bg-white text-sm"
           />
           {errors.campaign_end_date && <p className="mt-1 text-sm text-red-600">{errors.campaign_end_date.message}</p>}
@@ -382,7 +400,7 @@ export default function Step3Financials({
               type="number"
               step="0.01"
               {...register("expected_roi_percent")}
-              disabled={disabled}
+              disabled={isFinancialsLocked}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
             />
             {errors.expected_roi_percent && <p className="mt-1 text-sm text-red-600">{errors.expected_roi_percent.message}</p>}
@@ -412,7 +430,7 @@ export default function Step3Financials({
           <label className="block text-sm font-medium text-gray-700">Clearing Option</label>
           <select
             {...register("clearing_option")}
-            disabled={disabled}
+            disabled={isFinancialsLocked}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border bg-white"
           >
             <option value="">Select clearing option...</option>

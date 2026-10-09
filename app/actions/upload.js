@@ -126,10 +126,24 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
           issuer_id: issuerId,
           doc_type: "other",
           file_url: publicUrl,
+          review_status: "pending",
+          rejection_reason: null,
           uploaded_by: userId,
           uploaded_at: new Date().toISOString(),
         });
       } else {
+        // Prevent replacing approved documents
+        const { data: existingDoc } = await supabaseAdmin
+          .from("project_docs")
+          .select("review_status")
+          .eq("project_id", projectId)
+          .eq("doc_type", file.type)
+          .maybeSingle();
+
+        if (existingDoc?.review_status === "approved") {
+          throw new Error(`Cannot replace document: ${file.type} has already been approved by an auditor.`);
+        }
+
         // Delete old slot if it exists, then insert to avoid unique constraint errors on upsert
         await supabaseAdmin.from("project_docs").delete().match({ project_id: projectId, doc_type: file.type });
         
@@ -138,6 +152,8 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
           issuer_id: issuerId,
           doc_type: file.type,
           file_url: publicUrl,
+          review_status: "pending",
+          rejection_reason: null,
           uploaded_by: userId,
           uploaded_at: new Date().toISOString(),
         });
@@ -145,9 +161,10 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
       results.documents++;
     } else if (file.category === "media") {
       if (file.isCover) {
-        // Update cover_image_url in projects table
+        // Update cover_image_url and reset cover_image_review_status to pending in projects table
         await supabaseAdmin.from("projects").update({
           cover_image_url: publicUrl,
+          cover_image_review_status: "pending",
         }).eq("id", projectId);
         results.cover = true;
       } else {
@@ -159,6 +176,8 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
           media_type: file.type,
           url: publicUrl,
           display_order: orderVal,
+          review_status: "pending",
+          rejection_reason: null,
         });
         results.media++;
       }
@@ -204,12 +223,34 @@ export async function deleteProjectFile(projectId, fileUrl, category) {
   const { issuerId } = await verifyProjectAccess(projectId);
 
   if (category === "document") {
+    const { data: doc } = await supabaseAdmin
+      .from("project_docs")
+      .select("review_status")
+      .eq("project_id", projectId)
+      .or(`file_url.eq.${fileUrl},url.eq.${fileUrl}`)
+      .maybeSingle();
+
+    if (doc?.review_status === "approved") {
+      throw new Error("Cannot delete document: Approved documents are locked and cannot be removed.");
+    }
+
     const urlParts = fileUrl.split("/project_docs/");
     if (urlParts.length === 2) {
       await supabaseAdmin.storage.from("project_docs").remove([urlParts[1]]);
       await supabaseAdmin.from("project_docs").delete().eq("file_url", fileUrl).eq("issuer_id", issuerId);
     }
   } else if (category === "media") {
+    const { data: media } = await supabaseAdmin
+      .from("project_media")
+      .select("review_status")
+      .eq("project_id", projectId)
+      .eq("url", fileUrl)
+      .maybeSingle();
+
+    if (media?.review_status === "approved") {
+      throw new Error("Cannot delete media file: Approved media files are locked and cannot be removed.");
+    }
+
     const urlParts = fileUrl.split("/project_media/");
     if (urlParts.length === 2) {
       await supabaseAdmin.storage.from("project_media").remove([urlParts[1]]);

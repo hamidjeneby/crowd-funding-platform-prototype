@@ -74,6 +74,7 @@ export async function getInvestorPortalData() {
     wallet_balance: Number(investor.wallet_balance || 0),
     investor_class: investor.investor_class || null,
     bank_verification_status: investor.bank_verification_status || "pending",
+    bank_verification_rejection_reason: investor.bank_verification_rejection_reason || null,
     bank_details: rawBankDetails,
     legal_name: investor.legal_name || investor.full_name || investor.legal_entity_name || "Investor",
     email: investor.email || "",
@@ -264,6 +265,7 @@ export async function updateBankDetails(bankDetails) {
     .update({
       bank_details: bankDetailsToSave,
       bank_verification_status: "pending",
+      bank_verification_rejection_reason: null,
     })
     .eq("id", investorId);
 

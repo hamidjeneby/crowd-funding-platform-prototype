@@ -4,6 +4,7 @@ import OnboardingFlow from "./components/OnboardingFlow";
 import OnboardingHeader from "./components/OnboardingHeader";
 import OrgGate from "@/app/components/auth/OrgGate";
 import { redirect } from "next/navigation";
+import { AlertTriangle } from "lucide-react";
 
 export default async function IssuerOnboardingPage() {
   const { userId, orgId } = await auth();
@@ -43,11 +44,17 @@ export default async function IssuerOnboardingPage() {
     console.error("Error fetching onboarding data:", error);
   }
 
-  const isFullyOnboarded =
-    data.issuer?.onboarding_status && data.issuer.onboarding_status !== "incomplete";
+  const rawStatus = (data.issuer?.onboarding_status || "incomplete").toLowerCase().trim();
+  const normalized = rawStatus.replace(/[-_]/g, " ").replace(/\s+/g, " ");
 
-  // 3. If user HAS an organization AND IS fully onboarded -> Redirect to Dashboard
-  if (isFullyOnboarded) {
+  const shouldRedirect =
+    normalized.includes("pending") ||
+    normalized === "completed" ||
+    normalized === "approved" ||
+    normalized === "rejected";
+
+  // 3. If user HAS an organization AND status is pending/completed/rejected -> Redirect to Dashboard
+  if (shouldRedirect) {
     redirect("/issuer-portal");
   }
 
@@ -55,6 +62,26 @@ export default async function IssuerOnboardingPage() {
   return (
     <div className="min-h-screen bg-[#fcfaf5] py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
+        {data.issuer?.review_notes && (
+          <div className="mb-8 p-5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 shadow-sm space-y-2 animate-in fade-in">
+            <div className="flex items-center gap-2 text-sm font-extrabold text-amber-950">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+              <span>Application Sent Back for Revision</span>
+            </div>
+            <p className="text-xs text-amber-900/90 leading-relaxed font-medium">
+              Following compliance review, your organization's onboarding application was sent back to you so you can make the necessary changes. Please review the auditor notes below and update your details accordingly.
+            </p>
+            <div className="pt-2 border-t border-amber-200/80 mt-2">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-800 block mb-1">
+                Auditor Review Notes:
+              </span>
+              <p className="text-xs font-semibold text-amber-950 bg-amber-100/70 p-3 rounded-xl border border-amber-200/60 whitespace-pre-wrap">
+                {data.issuer.review_notes}
+              </p>
+            </div>
+          </div>
+        )}
+
         <OnboardingHeader
           title="Issuer Onboarding"
           subtitle="Please complete your organization onboarding details below. You can switch active workspaces using the workspace switcher on the right."

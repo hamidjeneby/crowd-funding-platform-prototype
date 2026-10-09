@@ -264,10 +264,10 @@ export async function updateProjectDraft(projectId, data, step) {
 
   const issuer = await getIssuerByOrgId(orgId);
 
-  // Confirm ownership and draft status
+  // Confirm ownership and editable status (draft or incomplete)
   const { data: project, error: projectError } = await supabaseAdmin
     .from("projects")
-    .select("issuer_id, status, current_step")
+    .select("issuer_id, status, current_step, shariah_compliance_status")
     .eq("id", projectId)
     .single();
 
@@ -279,53 +279,56 @@ export async function updateProjectDraft(projectId, data, step) {
     throw new Error("Unauthorized: Project ownership mismatch.");
   }
 
-  if (project.status !== "draft") {
-    throw new Error("Cannot edit project: Status is not draft.");
+  if (project.status !== "draft" && project.status !== "incomplete") {
+    throw new Error("Cannot edit project: Project is under active audit or published.");
   }
+
+  const isShariahApproved = project.shariah_compliance_status === "approved";
 
   let updateError = null;
 
   switch (step) {
     case 1: {
-      // Basic info
-      let slug = slugify(data.title || "", { lower: true, strict: true });
-      let isUnique = false;
-      let counter = 0;
-      let currentSlug = slug;
+      if (!isShariahApproved && data.title) {
+        let slug = slugify(data.title || "", { lower: true, strict: true });
+        let isUnique = false;
+        let counter = 0;
+        let currentSlug = slug;
 
-      while (!isUnique) {
-        const { data: existing } = await supabaseAdmin
-          .from("projects")
-          .select("id")
-          .eq("slug", currentSlug)
-          .neq("id", projectId)
-          .maybeSingle();
+        while (!isUnique) {
+          const { data: existing } = await supabaseAdmin
+            .from("projects")
+            .select("id")
+            .eq("slug", currentSlug)
+            .neq("id", projectId)
+            .maybeSingle();
 
-        if (!existing) {
-          isUnique = true;
-        } else {
-          counter++;
-          currentSlug = `${slug}-${counter}`;
+          if (!existing) {
+            isUnique = true;
+          } else {
+            counter++;
+            currentSlug = `${slug}-${counter}`;
+          }
         }
+
+        const { error } = await supabaseAdmin
+          .from("projects")
+          .update({
+            title: data.title,
+            slug: currentSlug,
+            summary: data.summary,
+            full_description: data.full_description,
+          })
+          .eq("id", projectId);
+
+        updateError = error;
       }
-
-      const { error } = await supabaseAdmin
-        .from("projects")
-        .update({
-          title: data.title,
-          slug: currentSlug,
-          summary: data.summary,
-          full_description: data.full_description,
-        })
-        .eq("id", projectId);
-
-      updateError = error;
 
       // Handle Issuer Milestones
       if (!updateError && Array.isArray(data.issuer_milestones)) {
         const { data: existingIssuerMs } = await supabaseAdmin
           .from("project_milestones")
-          .select("id")
+          .select("id, title, description, target_date, verification_status")
           .eq("project_id", projectId)
           .eq("milestone_source", "issuer");
 
@@ -340,173 +343,196 @@ export async function updateProjectDraft(projectId, data, step) {
 
         for (const m of data.issuer_milestones) {
           if (!m.title || !m.title.trim()) continue;
+          const newTitle = m.title.trim();
+          const newDesc = m.description ? m.description.trim() : null;
+          const newDate = m.target_date ? parseAsUtcIso(m.target_date) : null;
+
           const payload = {
             project_id: projectId,
             issuer_id: issuer.id, // Server-enforced session value
             milestone_source: "issuer", // Server-enforced
             linked_system_event: null, // Server-enforced
             status: "upcoming", // Server-enforced
-            title: m.title.trim(),
-            description: m.description ? m.description.trim() : null,
-            target_date: m.target_date ? parseAsUtcIso(m.target_date) : null,
+            title: newTitle,
+            description: newDesc,
+            target_date: newDate,
           };
 
           if (m.id) {
+            const existing = (existingIssuerMs || []).find((em) => String(em.id) === String(m.id));
+            const existingDateIso = existing?.target_date ? parseAsUtcIso(existing.target_date) : null;
+
+            const titleChanged = !existing || existing.title !== newTitle;
+            const descChanged = !existing || (existing.description || null) !== newDesc;
+            const dateChanged = !existing || existingDateIso !== newDate;
+
+            const milestoneEdited = titleChanged || descChanged || dateChanged;
+
+            const updatePayload = milestoneEdited
+              ? { ...payload, verification_status: "pending" }
+              : payload;
+
             await supabaseAdmin
               .from("project_milestones")
-              .update(payload)
+              .update(updatePayload)
               .eq("id", m.id)
               .eq("project_id", projectId)
               .eq("milestone_source", "issuer");
           } else {
-            await supabaseAdmin.from("project_milestones").insert(payload);
+            await supabaseAdmin.from("project_milestones").insert({
+              ...payload,
+              verification_status: "pending",
+            });
           }
         }
       }
       break;
     }
     case 2: {
-      // Structure
-      const unitType = data.sharia_contract_type === "spv_equity" ? "shares" : "sukuk";
+      if (!isShariahApproved) {
+        const unitType = data.sharia_contract_type === "spv_equity" ? "shares" : "sukuk";
 
-      const { error } = await supabaseAdmin
-        .from("projects")
-        .update({
-          sharia_contract_type: data.sharia_contract_type,
-          is_spv: data.is_spv,
-          unit_type: unitType,
-        })
-        .eq("id", projectId);
+        const { error } = await supabaseAdmin
+          .from("projects")
+          .update({
+            sharia_contract_type: data.sharia_contract_type,
+            is_spv: data.is_spv,
+            unit_type: unitType,
+          })
+          .eq("id", projectId);
 
-      updateError = error;
+        updateError = error;
 
-      if (!updateError && data.is_spv) {
-        const isConversion = Boolean(data.conversion_enabled);
-        const isSpvEquity = data.sharia_contract_type === "spv_equity";
-        const totalSharesAuth =
-          data.total_shares_authorized !== undefined &&
-          data.total_shares_authorized !== "" &&
-          !isNaN(data.total_shares_authorized)
-            ? Number(data.total_shares_authorized)
-            : null;
+        if (!updateError && data.is_spv) {
+          const isConversion = Boolean(data.conversion_enabled);
+          const isSpvEquity = data.sharia_contract_type === "spv_equity";
+          const totalSharesAuth =
+            data.total_shares_authorized !== undefined &&
+            data.total_shares_authorized !== "" &&
+            !isNaN(data.total_shares_authorized)
+              ? Number(data.total_shares_authorized)
+              : null;
 
-        const ratioShares =
-          isConversion &&
-          data.conversion_ratio_shares !== undefined &&
-          data.conversion_ratio_shares !== "" &&
-          !isNaN(data.conversion_ratio_shares)
-            ? Number(data.conversion_ratio_shares)
-            : null;
+          const ratioShares =
+            isConversion &&
+            data.conversion_ratio_shares !== undefined &&
+            data.conversion_ratio_shares !== "" &&
+            !isNaN(data.conversion_ratio_shares)
+              ? Number(data.conversion_ratio_shares)
+              : null;
 
-        let totalCostAuth = null;
-        if (!isSpvEquity && isConversion && ratioShares && ratioShares > 0 && totalSharesAuth && totalSharesAuth > 0) {
-          const { data: projectRow } = await supabaseAdmin
-            .from("projects")
-            .select("unit_price")
-            .eq("id", projectId)
+          let totalCostAuth = null;
+          if (!isSpvEquity && isConversion && ratioShares && ratioShares > 0 && totalSharesAuth && totalSharesAuth > 0) {
+            const { data: projectRow } = await supabaseAdmin
+              .from("projects")
+              .select("unit_price")
+              .eq("id", projectId)
+              .maybeSingle();
+
+            if (projectRow?.unit_price && Number(projectRow.unit_price) > 0) {
+              totalCostAuth = (Number(projectRow.unit_price) / ratioShares) * totalSharesAuth;
+            }
+          }
+
+          const spvPayload = {
+            spv_legal_name: data.spv_legal_name,
+            registration_authority: data.registration_authority,
+            registration_number: data.registration_number,
+            total_shares_authorized: totalSharesAuth,
+            total_cost_authorized: totalCostAuth,
+            conversion_enabled: isConversion,
+            conversion_trigger_type: "share_price_above",
+            conversion_trigger_value: isConversion && data.conversion_trigger_value !== undefined && data.conversion_trigger_value !== "" ? Number(data.conversion_trigger_value) : null,
+            conversion_ratio_shares: ratioShares,
+            conversion_deadline: isConversion && data.conversion_deadline ? data.conversion_deadline : null,
+          };
+
+          // Upsert spv_details
+          const { data: existingSpv } = await supabaseAdmin
+            .from("spv_details")
+            .select("id")
+            .eq("project_id", projectId)
             .maybeSingle();
 
-          if (projectRow?.unit_price && Number(projectRow.unit_price) > 0) {
-            totalCostAuth = (Number(projectRow.unit_price) / ratioShares) * totalSharesAuth;
+          let spvError;
+          if (existingSpv) {
+            const res = await supabaseAdmin
+              .from("spv_details")
+              .update(spvPayload)
+              .eq("project_id", projectId)
+              .eq("issuer_id", issuer.id);
+            spvError = res.error;
+          } else {
+            const res = await supabaseAdmin.from("spv_details").insert({
+              project_id: projectId,
+              issuer_id: issuer.id,
+              ...spvPayload,
+            });
+            spvError = res.error;
           }
+
+          updateError = spvError;
         }
-
-        const spvPayload = {
-          spv_legal_name: data.spv_legal_name,
-          registration_authority: data.registration_authority,
-          registration_number: data.registration_number,
-          total_shares_authorized: totalSharesAuth,
-          total_cost_authorized: totalCostAuth,
-          conversion_enabled: isConversion,
-          conversion_trigger_type: "share_price_above",
-          conversion_trigger_value: isConversion && data.conversion_trigger_value !== undefined && data.conversion_trigger_value !== "" ? Number(data.conversion_trigger_value) : null,
-          conversion_ratio_shares: ratioShares,
-          conversion_deadline: isConversion && data.conversion_deadline ? data.conversion_deadline : null,
-        };
-
-        // Upsert spv_details
-        const { data: existingSpv } = await supabaseAdmin
-          .from("spv_details")
-          .select("id")
-          .eq("project_id", projectId)
-          .maybeSingle();
-
-        let spvError;
-        if (existingSpv) {
-          const res = await supabaseAdmin
-            .from("spv_details")
-            .update(spvPayload)
-            .eq("project_id", projectId)
-            .eq("issuer_id", issuer.id);
-          spvError = res.error;
-        } else {
-          const res = await supabaseAdmin.from("spv_details").insert({
-            project_id: projectId,
-            issuer_id: issuer.id,
-            ...spvPayload,
-          });
-          spvError = res.error;
-        }
-
-        updateError = spvError;
       }
       break;
     }
     case 3: {
-      // Financials (now on projects table)
-      const campaignEndDateIso = data.campaign_end_date ? parseAsUtcIso(data.campaign_end_date) : null;
+      if (!isShariahApproved) {
+        // Financials (now on projects table)
+        const campaignEndDateIso = data.campaign_end_date ? parseAsUtcIso(data.campaign_end_date) : null;
 
-      const { error } = await supabaseAdmin
-        .from("projects")
-        .update({
-          target_goal: data.target_goal,
-          soft_cap: data.soft_cap,
-          hard_cap: data.hard_cap,
-          min_investment_floor: data.min_investment_floor,
-          unit_price: data.unit_price || null,
-          expected_roi_percent: data.expected_roi_percent,
-          yield_type: data.yield_type,
-          currency: data.currency,
-          clearing_option: data.clearing_option,
-          campaign_end_date: campaignEndDateIso,
-        })
-        .eq("id", projectId);
-
-      updateError = error;
-
-      if (!updateError) {
-        // Keep system milestones in sync with campaign_end_date
-        await ensureSystemMilestonesExist(projectId, campaignEndDateIso);
-
-        const { data: proj } = await supabaseAdmin
+        const { error } = await supabaseAdmin
           .from("projects")
-          .select("sharia_contract_type")
-          .eq("id", projectId)
-          .maybeSingle();
+          .update({
+            target_goal: data.target_goal,
+            soft_cap: data.soft_cap,
+            hard_cap: data.hard_cap,
+            min_investment_floor: data.min_investment_floor,
+            unit_price: data.unit_price || null,
+            expected_roi_percent: data.expected_roi_percent,
+            yield_type: data.yield_type,
+            currency: data.currency,
+            clearing_option: data.clearing_option,
+            campaign_end_date: campaignEndDateIso,
+          })
+          .eq("id", projectId);
 
-        const isSpvEquity = proj?.sharia_contract_type === "spv_equity";
+        updateError = error;
 
-        const { data: spvRow } = await supabaseAdmin
-          .from("spv_details")
-          .select("id, conversion_enabled, conversion_ratio_shares, total_shares_authorized")
-          .eq("project_id", projectId)
-          .maybeSingle();
+        if (!updateError) {
+          // Keep system milestones in sync with campaign_end_date
+          await ensureSystemMilestonesExist(projectId, campaignEndDateIso);
 
-        if (spvRow) {
-          let calculatedTotalCost = null;
-          const unitPrice = data.unit_price ? Number(data.unit_price) : 0;
-          const isConversion = Boolean(spvRow.conversion_enabled);
-          const ratio = spvRow.conversion_ratio_shares ? Number(spvRow.conversion_ratio_shares) : 0;
-          const sharesAuth = spvRow.total_shares_authorized ? Number(spvRow.total_shares_authorized) : 0;
+          const { data: proj } = await supabaseAdmin
+            .from("projects")
+            .select("sharia_contract_type")
+            .eq("id", projectId)
+            .maybeSingle();
 
-          if (!isSpvEquity && isConversion && unitPrice > 0 && ratio > 0 && sharesAuth > 0) {
-            calculatedTotalCost = (unitPrice / ratio) * sharesAuth;
-          }
+          const isSpvEquity = proj?.sharia_contract_type === "spv_equity";
 
-          await supabaseAdmin
+          const { data: spvRow } = await supabaseAdmin
             .from("spv_details")
-            .update({ total_cost_authorized: calculatedTotalCost })
-            .eq("id", spvRow.id);
+            .select("id, conversion_enabled, conversion_ratio_shares, total_shares_authorized")
+            .eq("project_id", projectId)
+            .maybeSingle();
+
+          if (spvRow) {
+            let calculatedTotalCost = null;
+            const unitPrice = data.unit_price ? Number(data.unit_price) : 0;
+            const isConversion = Boolean(spvRow.conversion_enabled);
+            const ratio = spvRow.conversion_ratio_shares ? Number(spvRow.conversion_ratio_shares) : 0;
+            const sharesAuth = spvRow.total_shares_authorized ? Number(spvRow.total_shares_authorized) : 0;
+
+            if (!isSpvEquity && isConversion && unitPrice > 0 && ratio > 0 && sharesAuth > 0) {
+              calculatedTotalCost = (unitPrice / ratio) * sharesAuth;
+            }
+
+            await supabaseAdmin
+              .from("spv_details")
+              .update({ total_cost_authorized: calculatedTotalCost })
+              .eq("id", spvRow.id);
+          }
         }
       }
       break;
@@ -541,10 +567,12 @@ export async function updateProjectDraft(projectId, data, step) {
   // Update current_step if needed
   const nextStep = Math.min(step + 1, 6);
   const currentSavedStep = project.current_step || 1;
-  if (currentSavedStep < nextStep) {
+  const newHighestStep = Math.max(currentSavedStep, nextStep);
+
+  if (currentSavedStep < newHighestStep) {
     const { error: stepError } = await supabaseAdmin
       .from("projects")
-      .update({ current_step: nextStep })
+      .update({ current_step: newHighestStep })
       .eq("id", projectId);
 
     if (stepError) {
@@ -552,7 +580,7 @@ export async function updateProjectDraft(projectId, data, step) {
     }
   }
 
-  return { success: true };
+  return { success: true, current_step: newHighestStep };
 }
 
 // Final submission
@@ -633,7 +661,7 @@ export async function submitProjectForReview(projectId) {
 
   const { error: updateError } = await supabaseAdmin
     .from("projects")
-    .update({ status: "pending_review" })
+    .update({ status: "pending_review", review_notes: null })
     .eq("id", projectId);
 
   if (updateError) {

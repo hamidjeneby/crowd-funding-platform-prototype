@@ -13,7 +13,7 @@ import Step5Media from "@/app/components/wizard/Step5Media";
 import Step6Preview from "@/app/components/wizard/Step6Preview";
 import { UploadProvider, useUpload } from "@/app/components/wizard/UploadProvider";
 import ProgressBar from "@/app/issuer-portal/onboarding/components/ProgressBar";
-import { Loader2, CheckCircle } from "lucide-react";
+import { Loader2, CheckCircle, AlertTriangle, ShieldCheck } from "lucide-react";
 
 const STEPS = [
   { id: 1, title: "Basic Info" },
@@ -31,6 +31,7 @@ function ProjectWizardPage() {
   const router = useRouter();
 
   const [currentStep, setCurrentStep] = useState(1);
+  const [maxReachedStep, setMaxReachedStep] = useState(1);
   const [projectData, setProjectData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -58,11 +59,14 @@ function ProjectWizardPage() {
         if (pError) throw pError;
         if (!project) throw new Error("Project not found");
 
-        if (project.status !== "draft") {
+        const highestStep = project.current_step || 1;
+        setMaxReachedStep(highestStep);
+
+        if (project.status !== "draft" && project.status !== "incomplete") {
           setError("This project is currently under review and is in read-only mode.");
           setCurrentStep(1);
         } else {
-          setCurrentStep(project.current_step || 1);
+          setCurrentStep(highestStep);
         }
 
         setProjectData(project);
@@ -77,11 +81,17 @@ function ProjectWizardPage() {
     loadProject();
   }, [isLoaded, userId, slug, getToken]);
 
-  const handleNext = () => {
-    setCurrentStep((s) => Math.min(s + 1, STEPS.length));
+  const handleNext = (res) => {
+    const targetStep = res?.current_step || Math.max(maxReachedStep, currentStep + 1);
+    setMaxReachedStep((prev) => Math.max(prev, targetStep));
+    setCurrentStep(targetStep);
   };
   const handlePrev = () => setCurrentStep((s) => Math.max(s - 1, 1));
-  const jumpToStep = (stepIndex) => setCurrentStep(stepIndex);
+  const jumpToStep = (stepIndex) => {
+    if (stepIndex <= maxReachedStep) {
+      setCurrentStep(stepIndex);
+    }
+  };
   const reloadData = async () => {
     if (!slug) return;
     setLoading(true);
@@ -100,6 +110,9 @@ function ProjectWizardPage() {
         .eq("slug", slug)
         .maybeSingle();
       setProjectData(project);
+      if (project?.current_step) {
+        setMaxReachedStep((prev) => Math.max(prev, project.current_step));
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -162,10 +175,35 @@ function ProjectWizardPage() {
     );
   }
 
-  const completedSteps = Array.from({ length: currentStep - 1 }, (_, i) => i + 1);
+  const completedSteps = Array.from({ length: Math.max(0, maxReachedStep - 1) }, (_, i) => i + 1);
+
+  const isEditable = projectData?.status === "draft" || projectData?.status === "incomplete";
+  const disabled = !isEditable;
+  const isShariahApproved = projectData?.shariah_compliance_status === "approved";
 
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8">
+      {/* Review Notes Banner if project was sent back by auditor */}
+      {projectData?.review_notes && (
+        <div className="mb-6 p-5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 shadow-sm space-y-2 animate-in fade-in">
+          <div className="flex items-center gap-2 text-sm font-extrabold text-amber-950">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+            <span>Auditor Feedback / Revision Notes</span>
+          </div>
+          <p className="text-xs text-amber-900/90 leading-relaxed font-medium">
+            This project proposal was sent back for revision by the auditor. Please review the auditor notes below and update your details before re-submitting.
+          </p>
+          <div className="pt-2 border-t border-amber-200/80 mt-2">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-800 block mb-1">
+              Auditor Review Notes:
+            </span>
+            <p className="text-xs font-semibold text-amber-950 bg-amber-100/70 p-3 rounded-xl border border-amber-200/60 whitespace-pre-wrap">
+              {projectData.review_notes}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Title block */}
       <div className="mb-8 flex justify-between items-center">
         <div>
@@ -180,7 +218,13 @@ function ProjectWizardPage() {
       </div>
 
       {/* Stepper */}
-      <ProgressBar currentStep={currentStep} steps={STEPS} completedSteps={completedSteps} />
+      <ProgressBar
+        currentStep={currentStep}
+        steps={STEPS}
+        completedSteps={completedSteps}
+        maxReachedStep={maxReachedStep}
+        onStepClick={jumpToStep}
+      />
 
       {/* Wizard Content */}
       <div className="bg-white rounded-xl shadow-lg border border-[#064e3b]/10 p-6 sm:p-10">
@@ -189,7 +233,8 @@ function ProjectWizardPage() {
             projectId={projectData?.id}
             initialData={projectData}
             onNext={handleNext}
-            disabled={projectData?.status !== "draft"}
+            disabled={disabled}
+            isShariahApproved={isShariahApproved}
             onUpdate={reloadData}
           />
         )}
@@ -199,7 +244,8 @@ function ProjectWizardPage() {
             initialData={projectData}
             onNext={handleNext}
             onPrev={handlePrev}
-            disabled={projectData?.status !== "draft"}
+            disabled={disabled}
+            isShariahApproved={isShariahApproved}
             onUpdate={reloadData}
           />
         )}
@@ -209,7 +255,8 @@ function ProjectWizardPage() {
             initialData={projectData}
             onNext={handleNext}
             onPrev={handlePrev}
-            disabled={projectData?.status !== "draft"}
+            disabled={disabled}
+            isShariahApproved={isShariahApproved}
             onUpdate={reloadData}
           />
         )}
@@ -219,7 +266,7 @@ function ProjectWizardPage() {
             initialData={projectData}
             onNext={handleNext}
             onPrev={handlePrev}
-            disabled={projectData?.status !== "draft"}
+            disabled={disabled}
             onUpdate={reloadData}
           />
         )}
@@ -229,7 +276,7 @@ function ProjectWizardPage() {
             initialData={projectData}
             onNext={handleNext}
             onPrev={handlePrev}
-            disabled={projectData?.status !== "draft"}
+            disabled={disabled}
             onUpdate={reloadData}
           />
         )}
@@ -239,7 +286,7 @@ function ProjectWizardPage() {
             projectData={projectData}
             onPrev={handlePrev}
             jumpToStep={jumpToStep}
-            disabled={projectData?.status !== "draft"}
+            disabled={disabled}
             onSuccess={() => router.push("/issuer-portal/projects")}
           />
         )}

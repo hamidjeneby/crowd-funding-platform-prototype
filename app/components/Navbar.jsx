@@ -29,8 +29,10 @@ export default function Navbar() {
   if (
     pathname?.startsWith("/investor-portal") ||
     pathname?.startsWith("/issuer-portal") ||
+    pathname?.startsWith("/auditor-portal") ||
     pathname?.startsWith("/investor") ||
-    pathname?.startsWith("/issuer")
+    pathname?.startsWith("/issuer") ||
+    pathname?.startsWith("/auditor")
   ) {
     return null;
   }
@@ -176,13 +178,22 @@ export default function Navbar() {
                       </div>
                     )}
                   </div>
+
+                  {/* Auditor Sign In Link */}
+                  <Link
+                    href="/auditor/sign-in"
+                    style={{ color: "#064e3b" }}
+                    className="font-medium transition-colors hover:opacity-80 whitespace-nowrap text-sm"
+                  >
+                    Auditor Sign In
+                  </Link>
                 </>
               )}
 
               {isSignedIn && (
                 <div className="flex items-center">
                   <Link
-                    href={role === "issuer" ? "/issuer-portal" : "/investor-portal"}
+                    href={role === "auditor" ? "/auditor-portal" : role === "issuer" ? "/issuer-portal" : "/investor-portal"}
                     className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-[#fdfbf7] bg-gradient-to-r from-[#059669] to-[#064e3b] rounded-lg shadow-sm hover:brightness-110 active:translate-y-[1px] transition-all"
                   >
                     <LayoutDashboard className="w-4 h-4" />
@@ -223,13 +234,20 @@ export default function Navbar() {
                         <Link href="/investor/sign-up" className="text-center text-sm bg-gradient-to-b from-[#059669] to-[#064e3b] border-b-[3px] border-[#033527] py-2 rounded-lg font-medium text-[#fdfbf7] active:translate-y-[1px] active:border-b-[1.5px] transition-all duration-100">Register</Link>
                       </div>
                     </div>
+
+                    <div className="border-t border-[#064e3b]/10 pt-3">
+                      <span className="text-[#064e3b]/60 text-xs font-bold uppercase tracking-wider px-3">Auditor</span>
+                      <div className="mt-2 px-3 pb-2">
+                        <Link href="/auditor/sign-in" className="block text-center text-sm bg-gradient-to-b from-white to-[#fcfaf5] border border-[#064e3b]/20 border-b-[3px] border-b-[#e5dccb] py-2 rounded-lg font-medium text-[#064e3b] active:translate-y-[1px] active:border-b-[1.5px] transition-all duration-100" onClick={() => setActiveDropdown(null)}>Auditor Sign In</Link>
+                      </div>
+                    </div>
                   </>
                 )}
                 
                 {isSignedIn && (
                   <div className="border-t border-[#064e3b]/10 pt-3 flex flex-col space-y-2 px-3 pb-2">
                     <Link
-                      href={role === "issuer" ? "/issuer-portal" : "/investor-portal"}
+                      href={role === "auditor" ? "/auditor-portal" : role === "issuer" ? "/issuer-portal" : "/investor-portal"}
                       className="flex items-center justify-center gap-2 text-center text-sm bg-gradient-to-b from-[#059669] to-[#064e3b] border-b-[3px] border-[#033527] py-2.5 rounded-lg font-medium text-[#fdfbf7] active:translate-y-[1px] active:border-b-[1.5px] transition-all duration-100"
                       onClick={() => setActiveDropdown(null)}
                     >

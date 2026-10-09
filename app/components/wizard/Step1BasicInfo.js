@@ -7,7 +7,7 @@ import * as z from "zod";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { updateProjectDraft, getProjectMilestones } from "@/app/actions/projects";
-import { Plus, Trash2, Calendar, Flag } from "lucide-react";
+import { Plus, Trash2, Calendar, Flag, ShieldCheck } from "lucide-react";
 
 const schema = z.object({
   title: z.string().min(1, "Title is required"),
@@ -50,6 +50,7 @@ export default function Step1BasicInfo({
   initialData,
   onNext,
   disabled,
+  isShariahApproved,
   onUpdate,
 }) {
   const [loading, setLoading] = useState(false);
@@ -108,10 +109,12 @@ export default function Step1BasicInfo({
 
   const summaryValue = watch("summary") || "";
 
+  const isBasicInfoLocked = disabled || isShariahApproved;
+
   const editor = useEditor({
     extensions: editorExtensions,
     content: initialData?.full_description || "",
-    editable: !disabled,
+    editable: !isBasicInfoLocked,
     onUpdate: ({ editor }) => {
       setValue("full_description", editor.getHTML(), { shouldValidate: true });
     },
@@ -127,8 +130,8 @@ export default function Step1BasicInfo({
   }, [initialData?.full_description, editor]);
 
   useEffect(() => {
-    editor?.setEditable(!disabled);
-  }, [disabled, editor]);
+    editor?.setEditable(!isBasicInfoLocked);
+  }, [isBasicInfoLocked, editor]);
 
   // Milestone list handlers
   const addMilestone = () => {
@@ -159,9 +162,9 @@ export default function Step1BasicInfo({
         issuer_milestones: milestones,
       };
 
-      await updateProjectDraft(projectId, payload, 1);
+      const res = await updateProjectDraft(projectId, payload, 1);
       await onUpdate();
-      onNext();
+      onNext(res);
     } catch (err) {
       setError(err.message || "Failed to save");
     } finally {
@@ -180,6 +183,13 @@ export default function Step1BasicInfo({
     <form onSubmit={handleFormSubmit} className="space-y-6">
       <h2 className="text-xl font-semibold">Basic Info</h2>
 
+      {isShariahApproved && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>This campaign is marked as Shariah Compliant (Approved). Title, summary, and description are locked. You may still add or update milestones below.</span>
+        </div>
+      )}
+
       {error && <p className="text-red-500">{error}</p>}
 
       <div>
@@ -192,8 +202,8 @@ export default function Step1BasicInfo({
         <input
           id="title"
           {...register("title")}
-          disabled={disabled}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
+          disabled={isBasicInfoLocked}
+          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border disabled:bg-gray-100 disabled:text-gray-600"
         />
         {errors.title && (
           <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>
@@ -210,9 +220,9 @@ export default function Step1BasicInfo({
         <textarea
           id="summary"
           {...register("summary")}
-          disabled={disabled}
+          disabled={isBasicInfoLocked}
           rows={3}
-          className={`mt-1 block w-full rounded-md shadow-sm focus:ring-blue-500 p-2 border ${
+          className={`mt-1 block w-full rounded-md shadow-sm focus:ring-blue-500 p-2 border disabled:bg-gray-100 disabled:text-gray-600 ${
             summaryValue.length > 150
               ? "border-red-500 focus:border-red-500"
               : "border-gray-300 focus:border-blue-500"
@@ -241,7 +251,7 @@ export default function Step1BasicInfo({
           Full Description
         </label>
 
-        {!disabled && editor && (
+        {!isBasicInfoLocked && editor && (
           <div className="flex flex-wrap gap-2 mb-2">
             <ToolbarButton
               label="Bold"

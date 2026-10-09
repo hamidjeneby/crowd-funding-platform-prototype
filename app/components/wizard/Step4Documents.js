@@ -93,11 +93,11 @@ export default function Step4Documents({ projectId, initialData, onNext, onPrev,
 
       if (filePayloads.length === 0) {
         // Nothing new to upload, just save draft and continue
-        await updateProjectDraft(projectId, {}, 4);
-        onNext();
+        const res = await updateProjectDraft(projectId, {}, 4);
+        onNext(res);
         return;
       }
-
+      
       // Step A: Get Signed URLs / Authorized Paths
       const authorizedFiles = await authorizeUploadBatch(projectId, filePayloads);
       
@@ -139,20 +139,36 @@ export default function Step4Documents({ projectId, initialData, onNext, onPrev,
       setReplacedFiles({});
 
       // Save step progress in backend and continue immediately
-      await updateProjectDraft(projectId, {}, 4);
+      const res = await updateProjectDraft(projectId, {}, 4);
       
       await onUpdate();
-      onNext();
+      onNext(res);
     } catch (err) {
       setError(err.message);
       setUploading(false);
     }
   };
 
+  const rejectedDocsCount = REQUIRED_DOCS.filter(docDef => {
+    const existing = docs.find(d => d.doc_type === docDef.type);
+    return existing?.review_status === "rejected" && !files[docDef.type] && !uploads[`doc_${docDef.type}`];
+  }).length;
+
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-semibold">Documents</h2>
       
+      {rejectedDocsCount > 0 && (
+        <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-900 text-xs font-semibold flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+          <span>
+            {rejectedDocsCount === 1
+              ? "1 document was rejected during auditor review. Please upload a replacement document below."
+              : `${rejectedDocsCount} documents were rejected during auditor review. Please upload replacement documents below.`}
+          </span>
+        </div>
+      )}
+
       {error && <p className="text-red-500 font-medium bg-red-50 p-3 rounded-md">{error}</p>}
       
       <div className="space-y-4">
@@ -160,34 +176,61 @@ export default function Step4Documents({ projectId, initialData, onNext, onPrev,
           const existing = docs.find(d => d.doc_type === docDef.type);
           const currentFile = files[docDef.type];
           const uploadState = uploads[`doc_${docDef.type}`];
+          const isApproved = existing?.review_status === "approved";
+          const isRejected = existing?.review_status === "rejected";
           
           return (
-            <div key={docDef.type} className="p-4 border rounded-md flex justify-between items-center bg-gray-50">
+            <div key={docDef.type} className={`p-4 border rounded-md flex justify-between items-center ${isRejected && !currentFile && !uploadState ? "bg-red-50/40 border-red-200" : "bg-gray-50"}`}>
               <div className="flex-1 mr-4">
-                <h3 className="font-medium">{docDef.label} <span className="text-red-500">*</span></h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-medium">{docDef.label} <span className="text-red-500">*</span></h3>
+                  {isRejected && !currentFile && !uploadState && (
+                    <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-800 text-[10px] font-bold border border-red-200">
+                      Rejected by Auditor
+                    </span>
+                  )}
+                </div>
                 
                 {uploadState ? (
                   <div className="mt-1">
                     <span className={`text-sm font-medium ${uploadState.status === "error" ? "text-red-600" : uploadState.status === "success" ? "text-green-600" : "text-blue-600"}`}>
-                      {uploadState.status === "error" ? "Upload Failed" : uploadState.status === "success" ? "Uploaded Successfully" : "Uploading in background..."}
+                      {uploadState.status === "error" ? "Upload Failed" : uploadState.status === "success" ? "Uploaded Successfully (Pending Review)" : "Uploading in background..."}
                     </span>
                     {uploadState.status === "error" && <span className="text-xs text-red-500 block">{uploadState.errorMessage || uploadState.filename}</span>}
                   </div>
                 ) : currentFile ? (
-                  <span className="text-sm text-gray-600 block mt-1 font-medium">{currentFile.name} (Staged)</span>
+                  <span className="text-sm text-gray-600 block mt-1 font-medium">{currentFile.name} (Staged for upload)</span>
                 ) : existing ? (
-                  <span className="text-sm text-green-600 block mt-1 font-medium">Uploaded Successfully</span>
+                  isApproved ? (
+                    <span className="text-sm text-green-700 block mt-1 font-semibold flex items-center gap-1">
+                      ✓ Approved (Locked)
+                    </span>
+                  ) : isRejected ? (
+                    <div className="mt-1.5 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-800 text-xs space-y-1">
+                      <div className="font-bold flex items-center gap-1.5 text-red-900">
+                        <AlertCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                        Document Rejected – Replacement Required
+                      </div>
+                      {existing.rejection_reason && (
+                        <p className="text-[11px] text-red-700 leading-normal pl-5">
+                          <strong>Auditor Note:</strong> {existing.rejection_reason}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-sm text-green-600 block mt-1 font-medium">Uploaded Successfully</span>
+                  )
                 ) : null}
               </div>
               
-              {!disabled && (
+              {!disabled && !isApproved && (
                 <div className="flex gap-2 items-center">
                   {uploadState?.status === "error" && (
                     <button type="button" onClick={() => retryUpload(`doc_${docDef.type}`)} className="text-sm flex items-center text-blue-600 hover:text-blue-800 px-2 py-1">
                       <RefreshCw className="w-4 h-4 mr-1" /> Retry
                     </button>
                   )}
-                  {(currentFile || existing) && !uploadState && (
+                  {(currentFile || existing) && !uploadState && !isRejected && (
                     <button
                       type="button"
                       onClick={() => handleRemove(docDef.type, existing?.file_url)}
@@ -199,8 +242,8 @@ export default function Step4Documents({ projectId, initialData, onNext, onPrev,
                   )}
                   
                   {(!uploadState || uploadState.status === "error" || uploadState.status === "success") && (
-                    <label className="cursor-pointer bg-white py-1 px-3 border rounded shadow-sm text-sm hover:bg-gray-50">
-                      {currentFile || existing || uploadState?.status === "success" ? "Replace" : "Upload"}
+                    <label className={`cursor-pointer py-1.5 px-3 border rounded shadow-xs text-sm font-semibold transition-all ${isRejected ? "bg-red-600 hover:bg-red-700 text-white border-transparent" : "bg-white hover:bg-gray-50 text-gray-700 border-gray-300"}`}>
+                      {currentFile || uploadState?.status === "success" ? "Replace" : isRejected ? "Upload Replacement" : existing ? "Replace" : "Upload"}
                       <input
                         type="file"
                         className="hidden"
@@ -209,6 +252,13 @@ export default function Step4Documents({ projectId, initialData, onNext, onPrev,
                       />
                     </label>
                   )}
+                </div>
+              )}
+              {isApproved && (
+                <div className="flex items-center">
+                  <span className="text-xs font-semibold text-green-800 bg-green-100 border border-green-200 px-2.5 py-1 rounded">
+                    Approved
+                  </span>
                 </div>
               )}
             </div>
