@@ -11,6 +11,7 @@ import {
   submitProjectFinalDecision,
   updateProjectShariahCompliance,
   updateProjectCoverImageDecision,
+  updateProjectSpvDetailsDecision,
 } from "@/app/actions/auditor";
 import {
   ArrowLeft,
@@ -43,13 +44,15 @@ import {
   Upload,
   FileCheck,
 } from "lucide-react";
+import { getRoiLabelForContract } from "@/lib/validation/repaymentTermsSchema";
 
 /**
  * Calculates baseline minimum eligible investor class based on class-rules.md §1 & §9
  */
-export function calculateBaselineMinClass(targetGoalNum, minFloorNum) {
+export function calculateBaselineMinClass(targetGoalNum, minFloorNum, shariaContractType) {
   const goal = Number(targetGoalNum || 0);
   const floor = Number(minFloorNum || 0);
+  const isSpvEquity = String(shariaContractType || "").toLowerCase() === "spv_equity";
 
   // 1. Floor Rule (§9): Max pledge ceilings per class
   let highestClassByFloor = 10;
@@ -65,20 +68,34 @@ export function calculateBaselineMinClass(targetGoalNum, minFloorNum) {
   else highestClassByFloor = 10;
 
   // 2. Goal Rule (§1): Target raise size thresholds
-  let highestClassByGoal = 10;
-  if (goal > 20000000) highestClassByGoal = 8;
+  // Classes 1-4: All live campaigns (>0)
+  // Class 5: > AED 5M
+  // Class 6: > AED 10M
+  // Class 7: > AED 15M
+  // Classes 8-10: > AED 20M only
+  let highestClassByGoal = 4;
+  if (goal > 20000000) highestClassByGoal = 10;
   else if (goal > 15000000) highestClassByGoal = 7;
   else if (goal > 10000000) highestClassByGoal = 6;
   else if (goal > 5000000) highestClassByGoal = 5;
-  else highestClassByGoal = 10;
+  else highestClassByGoal = 4;
+
+  // 3. Sharia Contract Type Rule: SPV Equity is not eligible for investors below Class 4 (Classes 5-10 ineligible)
+  const highestClassByContract = isSpvEquity ? 4 : 10;
 
   // Combination: Most restrictive (smallest numeric class)
-  const calculatedMinClass = Math.min(highestClassByFloor, highestClassByGoal);
+  const calculatedMinClass = Math.min(
+    highestClassByFloor,
+    highestClassByGoal,
+    highestClassByContract
+  );
 
   return {
     calculatedMinClass,
     highestClassByFloor,
     highestClassByGoal,
+    highestClassByContract,
+    isSpvEquity,
     floor,
     goal,
   };
@@ -100,7 +117,7 @@ function formatDate(dateStr) {
 
 export default function ProjectDetailReviewClient({
   project: initialProject,
-  spvDetails,
+  spvDetails: initialSpvDetails,
   issuer,
   documents: initialDocuments = [],
   media: initialMedia = [],
@@ -113,6 +130,7 @@ export default function ProjectDetailReviewClient({
 
   // Optimistic local states
   const [project, setLocalProject] = useState(initialProject);
+  const [spvDetails, setLocalSpvDetails] = useState(initialSpvDetails);
   const [documents, setLocalDocs] = useState(initialDocuments);
   const [media, setLocalMedia] = useState(initialMedia);
   const [milestones, setLocalMilestones] = useState(initialMilestones);
@@ -121,6 +139,7 @@ export default function ProjectDetailReviewClient({
   const baselineInfo = calculateBaselineMinClass(
     project?.target_goal,
     project?.min_investment_floor || project?.min_investment_amount,
+    project?.sharia_contract_type,
   );
 
   const [minClass, setLocalMinClass] = useState(
@@ -130,7 +149,19 @@ export default function ProjectDetailReviewClient({
       : String(baselineInfo.calculatedMinClass),
   );
 
+  const contractTerms = (() => {
+    if (!project?.contract_terms) return null;
+    if (typeof project.contract_terms === "object") return project.contract_terms;
+    try {
+      return JSON.parse(project.contract_terms);
+    } catch {
+      return null;
+    }
+  })();
+  const roiLabel = getRoiLabelForContract(project?.sharia_contract_type);
+
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalProject(initialProject);
     if (
       initialProject?.min_eligible_investor_class !== null &&
@@ -140,7 +171,12 @@ export default function ProjectDetailReviewClient({
     } else {
       setLocalMinClass(String(baselineInfo.calculatedMinClass));
     }
-  }, [initialProject]);
+  }, [initialProject, baselineInfo.calculatedMinClass]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLocalSpvDetails(initialSpvDetails);
+  }, [initialSpvDetails]);
 
   // Class actually saved on the project vs. the auditor's current (possibly unsaved) pick
   const assignedClass =
@@ -151,14 +187,17 @@ export default function ProjectDetailReviewClient({
   const isClassSelectionDirty = String(minClass) !== assignedClass;
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalDocs(initialDocuments);
   }, [initialDocuments]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalMedia(initialMedia);
   }, [initialMedia]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalMilestones(initialMilestones);
   }, [initialMilestones]);
 
@@ -167,6 +206,8 @@ export default function ProjectDetailReviewClient({
   const [rawViewMode, setRawViewMode] = useState("rows"); // "rows" | "raw"
   const [rejectingItem, setRejectingItem] = useState(null); // { type: 'doc'|'media', id, title }
   const [rejectionReason, setRejectionReason] = useState("");
+  const [rejectingSpvModalOpen, setRejectingSpvModalOpen] = useState(false);
+  const [spvRejectionReason, setSpvRejectionReason] = useState("");
 
   const [finalDecisionModal, setFinalDecisionModal] = useState(null); // 'send_back' | 'reject'
   const [finalReviewNotes, setFinalReviewNotes] = useState("");
@@ -198,6 +239,37 @@ export default function ProjectDetailReviewClient({
     ? (project?.cover_image_review_status || "pending") === "pending"
     : false;
 
+  // SPV review status
+  const isSpvPending = Boolean(
+    spvDetails &&
+      (spvDetails.spv_detail_verification_status === "pending" ||
+        !spvDetails.spv_detail_verification_status),
+  );
+  const isSpvRejected = Boolean(
+    spvDetails && spvDetails.spv_detail_verification_status === "rejected",
+  );
+  const isSpvApproved = Boolean(
+    spvDetails && spvDetails.spv_detail_verification_status === "approved",
+  );
+
+  // Shariah review status & connected blocking
+  const shariahStatus = project?.shariah_compliance_status;
+  const isShariahApproved = shariahStatus === "approved";
+  const isShariahRejected = shariahStatus === "rejected";
+  // If SPV is rejected, Shariah compliance is blocked from being audited/approved
+  const isShariahBlocked = isSpvRejected;
+  const isShariahPending =
+    !isShariahBlocked && !isShariahApproved && !isShariahRejected;
+
+  // Minimum eligible investor class assignment & connected blocking
+  const isClassAssigned =
+    assignedClass !== null &&
+    assignedClass !== undefined &&
+    assignedClass !== "";
+  // Class assignment is blocked if SPV was rejected or if Shariah was marked non-compliant (rejected)
+  const isClassBlocked = isSpvRejected || isShariahRejected;
+  const isClassPending = !isClassBlocked && !isClassAssigned;
+
   const rawProjectStatus = (project?.status || "").toLowerCase().trim();
   const isPendingReviewStatus =
     rawProjectStatus === "pending_review" ||
@@ -209,7 +281,16 @@ export default function ProjectDetailReviewClient({
     pendingDocsCount > 0 ||
     pendingMediaCount > 0 ||
     pendingMilestonesCount > 0 ||
-    isCoverPending;
+    isCoverPending ||
+    isSpvPending ||
+    isShariahPending ||
+    isClassPending;
+
+  const isPublishAllowed =
+    !isSpvRejected &&
+    !isShariahRejected &&
+    isShariahApproved &&
+    isClassAssigned;
 
   const handleCoverImageDecision = async (decision) => {
     setActionError(null);
@@ -471,6 +552,66 @@ export default function ProjectDetailReviewClient({
   };
 
   // ------------------------------------------------------------------
+  // Handlers for SPV Details Verification Decisions
+  // ------------------------------------------------------------------
+  const handleApproveSpvDetails = async () => {
+    setActionError(null);
+    setActiveAction("approve_spv_details");
+
+    try {
+      const res = await updateProjectSpvDetailsDecision({
+        projectId: project.id,
+        decision: "approved",
+      });
+      if (!res.success) {
+        setActionError(res.error || "Failed to approve SPV details.");
+      } else {
+        setLocalSpvDetails((prev) => ({
+          ...prev,
+          spv_detail_verification_status: "approved",
+          rejection_reason: null,
+        }));
+      }
+    } catch (err) {
+      setActionError("An unexpected error occurred while approving SPV details.");
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const handleConfirmRejectSpv = async () => {
+    if (!spvRejectionReason.trim()) {
+      setActionError("Please provide a rejection reason for the SPV details.");
+      return;
+    }
+    setActionError(null);
+    setActiveAction("reject_spv_details");
+
+    try {
+      const res = await updateProjectSpvDetailsDecision({
+        projectId: project.id,
+        decision: "rejected",
+        rejectionReason: spvRejectionReason.trim(),
+      });
+      if (!res.success) {
+        setActionError(res.error || "Failed to reject SPV details.");
+      } else {
+        setLocalSpvDetails((prev) => ({
+          ...prev,
+          spv_detail_verification_status: "rejected",
+          rejection_reason: spvRejectionReason.trim(),
+        }));
+        setRejectingSpvModalOpen(false);
+        setSpvRejectionReason("");
+      }
+    } catch (err) {
+      setActionError("An unexpected error occurred while rejecting SPV details.");
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  // ------------------------------------------------------------------
   // Handler for Shariah Compliance Decision & Certificate Upload
   // ------------------------------------------------------------------
   const handleUpdateShariahCompliance = async (decision) => {
@@ -496,7 +637,18 @@ export default function ProjectDetailReviewClient({
           shariah_compliance_doc_url: res.shariah_certificate_doc_url,
           signedShariahDocUrl:
             res.signedShariahDocUrl || prev?.signedShariahDocUrl,
+          ...(decision === "rejected" ? { min_eligible_investor_class: null } : {}),
         }));
+        if (decision === "rejected") {
+          setLocalMinClass("");
+        }
+        if (decision === "approved" && spvDetails) {
+          setLocalSpvDetails((prev) => ({
+            ...prev,
+            spv_detail_verification_status: "approved",
+            rejection_reason: null,
+          }));
+        }
         setShariahFile(null);
       }
     } catch (err) {
@@ -512,6 +664,12 @@ export default function ProjectDetailReviewClient({
   // Handlers for Overall Final Project Decision
   // ------------------------------------------------------------------
   const handleApproveFinalProject = () => {
+    if (!isPublishAllowed) {
+      setActionError(
+        "Cannot authorize campaign publication: Project must have approved SPV details, approved Shariah certification, and an assigned minimum investor class.",
+      );
+      return;
+    }
     setActionError(null);
     setActiveAction("final_approve");
 
@@ -807,16 +965,23 @@ export default function ProjectDetailReviewClient({
             </span>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-gray-50 space-y-1">
-            <span className="text-gray-400 block font-medium">
-              Expected Return / ROI
-            </span>
-            <span className="font-extrabold text-emerald-700 font-mono">
-              {project.expected_roi_percent
-                ? `${project.expected_roi_percent}% APR`
-                : "N/A"}
-            </span>
-          </div>
+          {project.sharia_contract_type !== "spv_equity" && (
+            <div className="p-3.5 rounded-2xl bg-gray-50 space-y-1">
+              <span className="text-gray-400 block font-medium">
+                {roiLabel}
+              </span>
+              <span className="font-extrabold text-emerald-700 font-mono">
+                {project.expected_roi_percent
+                  ? `${project.expected_roi_percent}%`
+                  : "N/A"}
+                {project.sharia_contract_type === "mudarabah" && (
+                  <span className="text-[10px] text-gray-500 font-normal block">
+                    (Target, not guaranteed)
+                  </span>
+                )}
+              </span>
+            </div>
+          )}
 
           <div className="p-3.5 rounded-2xl bg-gray-50 space-y-1">
             <span className="text-gray-400 block font-medium">
@@ -853,6 +1018,189 @@ export default function ProjectDetailReviewClient({
               {formatDate(project.campaign_end_date)}
             </span>
           </div>
+
+          {project.sharia_contract_type !== "spv_equity" && (
+            <div className="p-3.5 rounded-2xl bg-gray-50 space-y-1">
+              <span className="text-gray-400 block font-medium">
+                Tenor / Term
+              </span>
+              <span className="font-bold text-gray-900">
+                {project.tenor_months ? `${project.tenor_months} months` : "N/A"}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Sharia Repayment / Exit Terms Sub-Panel */}
+        <div className="p-5 rounded-2xl bg-[#fcfbf7] border border-gray-200/70 space-y-3">
+          <div className="flex items-center justify-between border-b border-gray-200/60 pb-2">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-900">
+              {project.sharia_contract_type === "spv_equity"
+                ? "SPV Equity Structure & Exit Terms"
+                : "Contract Repayment Terms"}
+            </span>
+            <span className="px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-900 font-bold text-[10px] uppercase">
+              {project.sharia_contract_type ? project.sharia_contract_type.replace("_", " ") : "Standard"}
+            </span>
+          </div>
+
+          {project.sharia_contract_type === "murabaha" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+              <div>
+                <span className="text-gray-500 block">Payment Frequency:</span>
+                <span className="font-bold text-gray-900 capitalize">
+                  {contractTerms?.payment_frequency ? contractTerms.payment_frequency.replace("_", " ") : "N/A"}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500 block">Principal Repayment:</span>
+                <span className="font-bold text-gray-900">
+                  {contractTerms?.principal_repayment === "with_instalments"
+                    ? "With instalments"
+                    : contractTerms?.principal_repayment === "at_maturity"
+                      ? "At maturity"
+                      : "N/A"}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500 block">Tenor:</span>
+                <span className="font-bold text-gray-900">
+                  {project.tenor_months ? `${project.tenor_months} months` : "N/A"}
+                </span>
+              </div>
+              {contractTerms?.asset_description && (
+                <div className="col-span-full pt-1">
+                  <span className="text-gray-500 block mb-1">Financed Asset Description:</span>
+                  <p className="font-medium text-gray-900 bg-white p-3 rounded-xl border border-gray-200/70 whitespace-pre-wrap text-xs">
+                    {contractTerms.asset_description}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {project.sharia_contract_type === "ijara" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+              <div>
+                <span className="text-gray-500 block">Rental Frequency:</span>
+                <span className="font-bold text-gray-900 capitalize">
+                  {contractTerms?.payment_frequency ? contractTerms.payment_frequency.replace("_", " ") : "N/A"}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500 block">Asset Value:</span>
+                <span className="font-bold text-emerald-900">
+                  {contractTerms?.asset_value != null
+                    ? `${project.currency || "AED"} ${Number(contractTerms.asset_value).toLocaleString()}`
+                    : "N/A"}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500 block">Lease Term:</span>
+                <span className="font-bold text-gray-900">
+                  {project.tenor_months ? `${project.tenor_months} months` : "N/A"}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500 block">End of Term Outcome:</span>
+                <span className="font-bold text-gray-900">
+                  {contractTerms?.end_of_term === "sale_to_issuer"
+                    ? "Sale to issuer"
+                    : contractTerms?.end_of_term === "sale_to_third_party"
+                      ? "Sale to third party"
+                      : contractTerms?.end_of_term === "return_asset"
+                        ? "Return asset"
+                        : "N/A"}
+                </span>
+              </div>
+              {contractTerms?.end_of_term === "sale_to_issuer" && contractTerms?.end_of_term_price != null && (
+                <div>
+                  <span className="text-gray-500 block">End of Term Price:</span>
+                  <span className="font-bold text-emerald-900">
+                    {project.currency || "AED"} {Number(contractTerms.end_of_term_price).toLocaleString()}
+                  </span>
+                </div>
+              )}
+              {contractTerms?.asset_description && (
+                <div className="col-span-full pt-1">
+                  <span className="text-gray-500 block mb-1">Leased Asset Description:</span>
+                  <p className="font-medium text-gray-900 bg-white p-3 rounded-xl border border-gray-200/70 whitespace-pre-wrap text-xs">
+                    {contractTerms.asset_description}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {project.sharia_contract_type === "mudarabah" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+              <div>
+                <span className="text-gray-500 block">Investor Profit Share:</span>
+                <span className="font-bold text-emerald-700">
+                  {contractTerms?.investor_profit_share_percent != null
+                    ? `${contractTerms.investor_profit_share_percent}%`
+                    : "N/A"}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500 block">Issuer Profit Share:</span>
+                <span className="font-bold text-gray-700">
+                  {contractTerms?.investor_profit_share_percent != null
+                    ? `${100 - Number(contractTerms.investor_profit_share_percent)}%`
+                    : "N/A"}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500 block">Reporting Frequency:</span>
+                <span className="font-bold text-gray-900 capitalize">
+                  {contractTerms?.profit_reporting_frequency
+                    ? contractTerms.profit_reporting_frequency.replace("_", " ")
+                    : "N/A"}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500 block">Tenor:</span>
+                <span className="font-bold text-gray-900">
+                  {project.tenor_months ? `${project.tenor_months} months` : "N/A"}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {project.sharia_contract_type === "spv_equity" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              <div>
+                <span className="text-gray-500 block">Existing Shares:</span>
+                <span className="font-bold text-gray-900">
+                  {contractTerms?.existing_shares_outstanding != null
+                    ? Number(contractTerms.existing_shares_outstanding).toLocaleString()
+                    : "0"}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500 block">Voting Rights:</span>
+                <span className="font-bold text-gray-900">
+                  {contractTerms?.voting_rights ? "Voting shares included" : "Non-voting shares"}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500 block">Dividend Policy:</span>
+                <span className="font-bold text-gray-900 capitalize">
+                  {contractTerms?.dividend_policy
+                    ? contractTerms.dividend_policy.replace("_", " ")
+                    : "None planned"}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500 block">Target Exit Horizon:</span>
+                <span className="font-bold text-gray-900">
+                  {contractTerms?.target_exit_horizon_years
+                    ? `${contractTerms.target_exit_horizon_years} years`
+                    : "Not specified"}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Full Project Description Content */}
@@ -874,7 +1222,15 @@ export default function ProjectDetailReviewClient({
       </div>
 
       {/* SECTION 2: SPV LEGAL STRUCTURE & CONVERSION DETAILS */}
-      <div className="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200/80 shadow-xs space-y-4">
+      <div
+        className={`rounded-3xl p-6 sm:p-8 border shadow-xs space-y-4 transition-colors ${
+          spvDetails?.spv_detail_verification_status === "approved"
+            ? "bg-emerald-50/70 border-emerald-300"
+            : spvDetails?.spv_detail_verification_status === "rejected"
+              ? "bg-red-50/70 border-red-300"
+              : "bg-white border-gray-200/80"
+        }`}
+      >
         <div className="flex items-center justify-between border-b border-gray-100 pb-4">
           <div className="space-y-0.5">
             <h2 className="text-base font-extrabold text-[#064e3b] flex items-center gap-2">
@@ -888,120 +1244,209 @@ export default function ProjectDetailReviewClient({
           </div>
 
           {spvDetails && spvDetails.spv_detail_verification_status && (
-            <span className="px-2.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs font-extrabold uppercase">
-              Status: {spvDetails.spv_detail_verification_status}
-            </span>
+            <div>
+              {spvDetails.spv_detail_verification_status === "approved" ? (
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-extrabold flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> SPV Approved
+                </span>
+              ) : spvDetails.spv_detail_verification_status === "rejected" ? (
+                <span className="px-2.5 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-200 text-xs font-extrabold flex items-center gap-1">
+                  <XCircle className="w-3.5 h-3.5 text-red-600" /> SPV Rejected
+                </span>
+              ) : (
+                <span className="px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-xs font-extrabold uppercase">
+                  Status: {spvDetails.spv_detail_verification_status}
+                </span>
+              )}
+            </div>
           )}
         </div>
 
-        {spvDetails ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
-            <div className="p-3.5 rounded-2xl bg-indigo-50/40 border border-indigo-100 space-y-1">
-              <span className="text-gray-400 block font-medium">
-                SPV Legal Entity Name
-              </span>
-              <span className="font-extrabold text-indigo-950 text-sm">
-                {spvDetails.spv_legal_name ||
-                  spvDetails.spv_name ||
-                  spvDetails.legal_name ||
-                  "N/A"}
-              </span>
-            </div>
-
-            <div className="p-3.5 rounded-2xl bg-indigo-50/40 border border-indigo-100 space-y-1">
-              <span className="text-gray-400 block font-medium">
-                Registration Authority
-              </span>
-              <span className="font-bold text-gray-900">
-                {spvDetails.registration_authority || "N/A"}
-              </span>
-            </div>
-
-            <div className="p-3.5 rounded-2xl bg-indigo-50/40 border border-indigo-100 space-y-1">
-              <span className="text-gray-400 block font-medium">
-                Registration Number
-              </span>
-              <span className="font-mono font-extrabold text-indigo-900">
-                {spvDetails.registration_number || "N/A"}
-              </span>
-            </div>
-
-            <div className="p-3.5 rounded-2xl bg-indigo-50/40 border border-indigo-100 space-y-1">
-              <span className="text-gray-400 block font-medium">
-                Total Shares Authorized
-              </span>
-              <span className="font-mono font-bold text-gray-900">
-                {spvDetails.total_shares_authorized
-                  ? Number(spvDetails.total_shares_authorized).toLocaleString()
-                  : "N/A"}
-              </span>
-            </div>
-
-            <div className="p-3.5 rounded-2xl bg-indigo-50/40 border border-indigo-100 space-y-1">
-              <span className="text-gray-400 block font-medium">
-                Total Cost Authorized
-              </span>
-              <span className="font-mono font-bold text-gray-900">
-                {spvDetails.total_cost_authorized
-                  ? `${project.currency || "AED"} ${Number(spvDetails.total_cost_authorized).toLocaleString()}`
-                  : "N/A"}
-              </span>
-            </div>
-
-            <div className="p-3.5 rounded-2xl bg-indigo-50/40 border border-indigo-100 space-y-1">
-              <span className="text-gray-400 block font-medium">
-                Conversion Clause Status
-              </span>
-              <span className="font-bold text-indigo-900">
-                {spvDetails.conversion_enabled ? "Enabled" : "Disabled"}
-              </span>
-            </div>
-
-            {spvDetails.conversion_enabled && (
-              <>
-                <div className="p-3.5 rounded-2xl bg-indigo-50/40 border border-indigo-100 space-y-1">
-                  <span className="text-gray-400 block font-medium">
-                    Conversion Trigger Type
-                  </span>
-                  <span className="font-bold text-gray-900">
-                    {spvDetails.conversion_trigger_type || "N/A"}
-                  </span>
-                </div>
-
-                <div className="p-3.5 rounded-2xl bg-indigo-50/40 border border-indigo-100 space-y-1">
-                  <span className="text-gray-400 block font-medium">
-                    Conversion Trigger Value
-                  </span>
-                  <span className="font-bold text-gray-900 font-mono">
-                    {spvDetails.conversion_trigger_value
-                      ? `${spvDetails.conversion_trigger_value} ${project.currency || "AED"}`
-                      : "N/A"}
-                  </span>
-                </div>
-
-                <div className="p-3.5 rounded-2xl bg-indigo-50/40 border border-indigo-100 space-y-1">
-                  <span className="text-gray-400 block font-medium">
-                    Conversion Ratio Shares
-                  </span>
-                  <span className="font-bold text-gray-900 font-mono">
-                    {spvDetails.conversion_ratio_shares || "N/A"} Shares / Unit
-                  </span>
-                </div>
-
-                <div className="p-3.5 rounded-2xl bg-indigo-50/40 border border-indigo-100 space-y-1">
-                  <span className="text-gray-400 block font-medium">
-                    Conversion Deadline
-                  </span>
-                  <span
-                    className="font-bold text-gray-800"
-                    suppressHydrationWarning
-                  >
-                    {formatDate(spvDetails.conversion_deadline)}
-                  </span>
-                </div>
-              </>
-            )}
+        {spvDetails?.spv_detail_verification_status === "rejected" && spvDetails?.rejection_reason && (
+          <div className="p-3.5 rounded-2xl bg-red-100/80 border border-red-200 text-xs text-red-800 space-y-1">
+            <span className="font-extrabold block flex items-center gap-1.5">
+              <AlertTriangle className="w-4 h-4 text-red-600" /> SPV Details Rejection Reason:
+            </span>
+            <p className="font-medium text-red-900 leading-relaxed pl-5">
+              {spvDetails.rejection_reason}
+            </p>
           </div>
+        )}
+
+        {spvDetails ? (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+              <div className="p-3.5 rounded-2xl bg-white/90 border border-indigo-100 space-y-1">
+                <span className="text-gray-400 block font-medium">
+                  SPV Legal Entity Name
+                </span>
+                <span className="font-extrabold text-indigo-950 text-sm">
+                  {spvDetails.spv_legal_name ||
+                    spvDetails.spv_name ||
+                    spvDetails.legal_name ||
+                    "N/A"}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-white/90 border border-indigo-100 space-y-1">
+                <span className="text-gray-400 block font-medium">
+                  Registration Authority
+                </span>
+                <span className="font-bold text-gray-900">
+                  {spvDetails.registration_authority || "N/A"}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-white/90 border border-indigo-100 space-y-1">
+                <span className="text-gray-400 block font-medium">
+                  Registration Number
+                </span>
+                <span className="font-mono font-extrabold text-indigo-900">
+                  {spvDetails.registration_number || "N/A"}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-white/90 border border-indigo-100 space-y-1">
+                <span className="text-gray-400 block font-medium">
+                  Total Shares Authorized
+                </span>
+                <span className="font-mono font-bold text-gray-900">
+                  {spvDetails.total_shares_authorized
+                    ? Number(spvDetails.total_shares_authorized).toLocaleString()
+                    : "N/A"}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-white/90 border border-indigo-100 space-y-1">
+                <span className="text-gray-400 block font-medium">
+                  Total Cost Authorized
+                </span>
+                <span className="font-mono font-bold text-gray-900">
+                  {(() => {
+                    if (spvDetails.total_cost_authorized) {
+                      return `${project.currency || "AED"} ${Number(spvDetails.total_cost_authorized).toLocaleString()}`;
+                    }
+                    if (
+                      (project.sharia_contract_type === "spv_equity" ||
+                        project.shariah_contract_type === "spv_equity") &&
+                      spvDetails.total_shares_authorized &&
+                      (project.share_price || project.unit_price)
+                    ) {
+                      const calculated =
+                        Number(spvDetails.total_shares_authorized) *
+                        Number(project.share_price || project.unit_price);
+                      return `${project.currency || "AED"} ${calculated.toLocaleString()}`;
+                    }
+                    return "N/A";
+                  })()}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-white/90 border border-indigo-100 space-y-1">
+                <span className="text-gray-400 block font-medium">
+                  Conversion Clause Status
+                </span>
+                <span className="font-bold text-indigo-900">
+                  {spvDetails.conversion_enabled ? "Enabled" : "Disabled"}
+                </span>
+              </div>
+
+              {spvDetails.conversion_enabled && (
+                <>
+                  <div className="p-3.5 rounded-2xl bg-white/90 border border-indigo-100 space-y-1">
+                    <span className="text-gray-400 block font-medium">
+                      Conversion Trigger Type
+                    </span>
+                    <span className="font-bold text-gray-900">
+                      {spvDetails.conversion_trigger_type || "N/A"}
+                    </span>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-white/90 border border-indigo-100 space-y-1">
+                    <span className="text-gray-400 block font-medium">
+                      Conversion Trigger Value
+                    </span>
+                    <span className="font-bold text-gray-900 font-mono">
+                      {spvDetails.conversion_trigger_value
+                        ? `${spvDetails.conversion_trigger_value} ${project.currency || "AED"}`
+                        : "N/A"}
+                    </span>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-white/90 border border-indigo-100 space-y-1">
+                    <span className="text-gray-400 block font-medium">
+                      Conversion Ratio Shares
+                    </span>
+                    <span className="font-bold text-gray-900 font-mono">
+                      {spvDetails.conversion_ratio_shares || "N/A"} Shares / Unit
+                    </span>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-white/90 border border-indigo-100 space-y-1">
+                    <span className="text-gray-400 block font-medium">
+                      Conversion Deadline
+                    </span>
+                    <span
+                      className="font-bold text-gray-800"
+                      suppressHydrationWarning
+                    >
+                      {formatDate(spvDetails.conversion_deadline)}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* SPV Details Verification Actions */}
+            <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-3 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setSpvRejectionReason(spvDetails.rejection_reason || "");
+                  setRejectingSpvModalOpen(true);
+                }}
+                disabled={activeAction === "reject_spv_details" || activeAction === "approve_spv_details"}
+                className={`w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50 ${
+                  spvDetails.spv_detail_verification_status === "rejected"
+                    ? "bg-red-200 text-red-900 border border-red-300"
+                    : "bg-red-50 hover:bg-red-100 text-red-700 border border-red-200"
+                }`}
+              >
+                {activeAction === "reject_spv_details" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <XCircle className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {spvDetails.spv_detail_verification_status === "rejected"
+                    ? "Update SPV Rejection Reason"
+                    : "Reject SPV Details"}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleApproveSpvDetails}
+                disabled={activeAction === "approve_spv_details" || activeAction === "reject_spv_details"}
+                className={`w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-5 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-50 ${
+                  spvDetails.spv_detail_verification_status === "approved"
+                    ? "bg-emerald-800 text-white border border-emerald-900"
+                    : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                }`}
+              >
+                {activeAction === "approve_spv_details" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {spvDetails.spv_detail_verification_status === "approved"
+                    ? "SPV Details Approved"
+                    : "Approve SPV Details"}
+                </span>
+              </button>
+            </div>
+          </>
         ) : (
           <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200/60 text-xs text-gray-500 italic">
             No Special Purpose Vehicle (SPV) structure attached to this project
@@ -1231,7 +1676,15 @@ export default function ProjectDetailReviewClient({
 
       {/* SECTION 4.A: PROJECT COVER IMAGE */}
       {project.cover_image_url && (
-        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200/80 shadow-xs space-y-6">
+        <div
+          className={`rounded-3xl p-6 sm:p-8 border shadow-xs space-y-6 transition-colors ${
+            project.cover_image_review_status === "approved"
+              ? "bg-emerald-50/70 border-emerald-300"
+              : project.cover_image_review_status === "rejected"
+                ? "bg-red-50/70 border-red-300"
+                : "bg-white border-gray-200/80"
+          }`}
+        >
           <div className="flex items-center justify-between border-b border-gray-100 pb-4">
             <div className="space-y-0.5">
               <h2 className="text-base font-extrabold text-[#064e3b] flex items-center gap-2">
@@ -1266,7 +1719,15 @@ export default function ProjectDetailReviewClient({
             </div>
           </div>
 
-          <div className="rounded-2xl border p-5 flex flex-col sm:flex-row items-center justify-between gap-6 bg-gray-50/50">
+          <div
+            className={`rounded-2xl border p-5 flex flex-col sm:flex-row items-center justify-between gap-6 transition-colors ${
+              project.cover_image_review_status === "approved"
+                ? "bg-white/80 border-emerald-200"
+                : project.cover_image_review_status === "rejected"
+                  ? "bg-white/80 border-red-200"
+                  : "bg-gray-50/50 border-gray-200/80"
+            }`}
+          >
             <div className="flex items-center gap-4">
               <img
                 src={project.cover_image_url}
@@ -1277,34 +1738,59 @@ export default function ProjectDetailReviewClient({
                 <p className="font-extrabold text-gray-900">
                   Campaign Hero Cover Image
                 </p>
+                <p className="text-gray-500">
+                  {project.cover_image_review_status === "approved"
+                    ? "Hero cover verified and approved for marketplace publication."
+                    : project.cover_image_review_status === "rejected"
+                      ? "Hero cover rejected. Issuer will need to upload a suitable replacement."
+                      : "Awaiting auditor decision."}
+                </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
               <button
+                type="button"
                 onClick={() => handleCoverImageDecision("rejected")}
                 disabled={activeAction !== null}
-                className="px-4 py-2 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+                  project.cover_image_review_status === "rejected"
+                    ? "bg-red-200 text-red-900 border border-red-300"
+                    : "border border-red-200 bg-red-50 hover:bg-red-100 text-red-700"
+                }`}
               >
                 {activeAction === "cover_image_rejected" ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
                   <XCircle className="w-3.5 h-3.5 text-red-600" />
                 )}
-                <span>Reject Cover</span>
+                <span>
+                  {project.cover_image_review_status === "rejected"
+                    ? "Cover Rejected"
+                    : "Reject Cover"}
+                </span>
               </button>
 
               <button
+                type="button"
                 onClick={() => handleCoverImageDecision("approved")}
                 disabled={activeAction !== null}
-                className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+                  project.cover_image_review_status === "approved"
+                    ? "bg-emerald-800 text-white border border-emerald-900"
+                    : "bg-emerald-700 hover:bg-emerald-800 text-white"
+                }`}
               >
                 {activeAction === "cover_image_approved" ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
                   <CheckCircle2 className="w-3.5 h-3.5" />
                 )}
-                <span>Approve Cover</span>
+                <span>
+                  {project.cover_image_review_status === "approved"
+                    ? "Cover Approved"
+                    : "Approve Cover"}
+                </span>
               </button>
             </div>
           </div>
@@ -1534,7 +2020,15 @@ export default function ProjectDetailReviewClient({
       </div>
 
       {/* SECTION: SHARIAH COMPLIANCE AUDIT & CERTIFICATION */}
-      <div className="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200/80 shadow-xs space-y-6">
+      <div
+        className={`rounded-3xl p-6 sm:p-8 border shadow-xs space-y-6 transition-colors ${
+          project?.shariah_compliance_status === "approved"
+            ? "bg-emerald-50/70 border-emerald-300"
+            : project?.shariah_compliance_status === "rejected"
+              ? "bg-red-50/70 border-red-300"
+              : "bg-white border-gray-200/80"
+        }`}
+      >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-100 pb-4 gap-3">
           <div className="space-y-0.5">
             <h2 className="text-base font-extrabold text-[#064e3b] flex items-center gap-2">
@@ -1549,12 +2043,12 @@ export default function ProjectDetailReviewClient({
 
           <div>
             {project?.shariah_compliance_status === "approved" ? (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                 Shariah Approved
               </span>
             ) : project?.shariah_compliance_status === "rejected" ? (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 border border-red-200 text-red-800 text-xs font-bold">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-100 border border-red-300 text-red-800 text-xs font-bold">
                 <XCircle className="w-3.5 h-3.5 text-red-600" />
                 Shariah Non-Compliant
               </span>
@@ -1566,6 +2060,21 @@ export default function ProjectDetailReviewClient({
             )}
           </div>
         </div>
+
+        {/* Warning if SPV details are rejected */}
+        {spvDetails?.spv_detail_verification_status === "rejected" && (
+          <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1 text-xs">
+              <span className="font-extrabold text-amber-900 block">
+                SPV Legal Details Rejected — Shariah Compliance Disabled
+              </span>
+              <p className="text-amber-800 leading-relaxed font-medium">
+                The SPV legal structure details for this project have been rejected. A project cannot be marked as Shariah compliant until valid SPV details are approved or re-submitted by the issuer.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Contract Type Input Data Summary */}
         <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-2xl p-5 space-y-3">
@@ -1628,7 +2137,7 @@ export default function ProjectDetailReviewClient({
         )}
 
         {/* Upload & Approval Form */}
-        <div className="space-y-4 pt-1">
+        <div className={`space-y-4 pt-1 ${spvDetails?.spv_detail_verification_status === "rejected" ? "opacity-60 pointer-events-none" : ""}`}>
           <label className="block text-xs font-extrabold text-gray-800 uppercase tracking-wider">
             Upload Shariah Compliance Certificate Document *
           </label>
@@ -1644,12 +2153,13 @@ export default function ProjectDetailReviewClient({
               type="file"
               id="shariahCertificateInput"
               accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+              disabled={spvDetails?.spv_detail_verification_status === "rejected"}
               onChange={(e) => {
                 if (e.target.files && e.target.files[0]) {
                   setShariahFile(e.target.files[0]);
                 }
               }}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed"
             />
 
             {shariahFile ? (
@@ -1698,7 +2208,7 @@ export default function ProjectDetailReviewClient({
             <button
               type="button"
               onClick={() => handleUpdateShariahCompliance("rejected")}
-              disabled={!!activeAction}
+              disabled={!!activeAction || spvDetails?.spv_detail_verification_status === "rejected"}
               className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-2xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer"
             >
               {activeAction === "shariah_rejected" ? (
@@ -1714,6 +2224,7 @@ export default function ProjectDetailReviewClient({
               onClick={() => handleUpdateShariahCompliance("approved")}
               disabled={
                 !!activeAction ||
+                spvDetails?.spv_detail_verification_status === "rejected" ||
                 (!shariahFile &&
                   !project?.shariah_certificate_doc_url &&
                   !project?.shariah_compliance_doc_url)
@@ -1749,7 +2260,12 @@ export default function ProjectDetailReviewClient({
             </p>
           </div>
 
-          {assignedClass ? (
+          {project?.shariah_compliance_status === "rejected" ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 border border-red-200 text-red-800 text-xs font-bold">
+              <XCircle className="w-3.5 h-3.5 text-red-600" />
+              Disabled (Non-Compliant)
+            </span>
+          ) : assignedClass ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
               <Lock className="w-3.5 h-3.5 text-emerald-600" />
               Assigned: Class {assignedClass}
@@ -1762,8 +2278,23 @@ export default function ProjectDetailReviewClient({
           )}
         </div>
 
+        {/* Warning if Shariah non-compliant */}
+        {project?.shariah_compliance_status === "rejected" && (
+          <div className="p-4 rounded-2xl bg-red-50 border border-red-200 flex items-start gap-3">
+            <XCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+            <div className="space-y-1 text-xs">
+              <span className="font-extrabold text-red-900 block">
+                Class Assignment Blocked — Project is Shariah Non-Compliant
+              </span>
+              <p className="text-red-800 leading-relaxed font-medium">
+                Because this project was marked as Shariah non-compliant, it cannot be published to any investor tier. The minimum eligible investor class is cleared and disabled until the project is compliant.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* System Calculated Baseline Recommendation Card (§1 & §9 of class-rules.md) */}
-        <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-5 space-y-3">
+        <div className={`bg-emerald-50/80 border border-emerald-200 rounded-2xl p-5 space-y-3 ${project?.shariah_compliance_status === "rejected" ? "opacity-60 pointer-events-none" : ""}`}>
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-extrabold text-emerald-950">
               <Info className="w-4 h-4 text-emerald-700" /> System Calculated
@@ -1775,7 +2306,7 @@ export default function ProjectDetailReviewClient({
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-1">
+          <div className={`grid grid-cols-1 ${baselineInfo.isSpvEquity ? "sm:grid-cols-3" : "sm:grid-cols-2"} gap-3 text-xs pt-1`}>
             <div className="p-3 bg-white/80 rounded-xl border border-emerald-200/60 space-y-1">
               <span className="text-gray-500 block font-medium">
                 1. Min Floor Constraint (AED{" "}
@@ -1788,7 +2319,7 @@ export default function ProjectDetailReviewClient({
             </div>
 
             <div className="p-3 bg-white/80 rounded-xl border border-emerald-200/60 space-y-1">
-              <span className="text-gray-400 block font-medium">
+              <span className="text-gray-500 block font-medium">
                 2. Target Goal Constraint (AED{" "}
                 {baselineInfo.goal.toLocaleString()})
               </span>
@@ -1797,6 +2328,17 @@ export default function ProjectDetailReviewClient({
                 <strong>Class {baselineInfo.highestClassByGoal}</strong>
               </span>
             </div>
+
+            {baselineInfo.isSpvEquity && (
+              <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-200 space-y-1">
+                <span className="text-amber-800 block font-medium">
+                  3. SPV Equity Constraint
+                </span>
+                <span className="font-bold text-amber-950 block">
+                  Capped at: <strong>Class 4</strong> (Classes 5–10 ineligible)
+                </span>
+              </div>
+            )}
           </div>
 
           <p className="text-[11px] text-emerald-800 italic">
@@ -1809,7 +2351,7 @@ export default function ProjectDetailReviewClient({
 
         {/* AI Model Output Recommendation if present */}
         {minVisClassAiReview && (
-          <div className="bg-linear-to-r from-indigo-50/80 to-purple-50/80 border border-indigo-200/80 rounded-2xl p-5 space-y-3">
+          <div className={`bg-linear-to-r from-indigo-50/80 to-purple-50/80 border border-indigo-200/80 rounded-2xl p-5 space-y-3 ${project?.shariah_compliance_status === "rejected" ? "opacity-60 pointer-events-none" : ""}`}>
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-xs font-extrabold text-indigo-950">
                 <Sparkles className="w-4 h-4 text-indigo-600" /> AI Model
@@ -1832,13 +2374,14 @@ export default function ProjectDetailReviewClient({
         )}
 
         {/* Auditor Class Level Selector */}
-        <div className="space-y-3">
+        <div className={`space-y-3 ${project?.shariah_compliance_status === "rejected" ? "opacity-50 pointer-events-none" : ""}`}>
           <label className="block text-xs font-extrabold text-gray-800 uppercase tracking-wider">
             Assign &amp; Lock Minimum Eligible Investor Class Level *
           </label>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2.5">
             {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((lvl) => {
+              const isSpvRestricted = baselineInfo.isSpvEquity && lvl > 4;
               const isCalculatedBaseline =
                 Number(lvl) === baselineInfo.calculatedMinClass;
               const isSelected = String(minClass) === String(lvl);
@@ -1846,7 +2389,10 @@ export default function ProjectDetailReviewClient({
 
               let stateClasses =
                 "bg-gray-50 hover:bg-gray-100 border-gray-200 text-gray-700";
-              if (isSelected && isAssigned) {
+              if (isSpvRestricted) {
+                stateClasses =
+                  "bg-gray-100/70 border-gray-200 text-gray-400 opacity-50 cursor-not-allowed";
+              } else if (isSelected && isAssigned) {
                 stateClasses =
                   "bg-emerald-950 text-white border-emerald-950 shadow-sm";
               } else if (isSelected) {
@@ -1858,7 +2404,8 @@ export default function ProjectDetailReviewClient({
               }
 
               let subLabel = null;
-              if (isAssigned) subLabel = "Assigned";
+              if (isSpvRestricted) subLabel = "Ineligible (SPV)";
+              else if (isAssigned) subLabel = "Assigned";
               else if (isSelected) subLabel = "Selected";
               else if (isCalculatedBaseline) subLabel = "Baseline";
 
@@ -1866,9 +2413,18 @@ export default function ProjectDetailReviewClient({
                 <button
                   key={lvl}
                   type="button"
-                  onClick={() => setLocalMinClass(String(lvl))}
+                  onClick={() => {
+                    if (!isSpvRestricted && project?.shariah_compliance_status !== "rejected") {
+                      setLocalMinClass(String(lvl));
+                    }
+                  }}
                   aria-pressed={isSelected}
-                  disabled={activeAction === "assign_min_class"}
+                  disabled={
+                    activeAction === "assign_min_class" ||
+                    isSpvRestricted ||
+                    project?.shariah_compliance_status === "rejected"
+                  }
+                  title={isSpvRestricted ? "SPV Equity projects are restricted to Class 4 and above" : undefined}
                   className={`p-3 rounded-2xl border text-xs font-bold transition-all text-center relative cursor-pointer disabled:cursor-not-allowed ${stateClasses}`}
                 >
                   {isAssigned && (
@@ -1882,13 +2438,15 @@ export default function ProjectDetailReviewClient({
                   {subLabel && (
                     <span
                       className={`block text-[9px] font-semibold uppercase tracking-wide mt-0.5 ${
-                        isSelected && isAssigned
-                          ? "text-emerald-300"
-                          : isSelected
-                            ? "text-indigo-600"
-                            : isAssigned
-                              ? "text-emerald-700"
-                              : "text-emerald-600"
+                        isSpvRestricted
+                          ? "text-red-500"
+                          : isSelected && isAssigned
+                            ? "text-emerald-300"
+                            : isSelected
+                              ? "text-indigo-600"
+                              : isAssigned
+                                ? "text-emerald-700"
+                                : "text-emerald-600"
                       }`}
                     >
                       {subLabel}
@@ -1903,14 +2461,18 @@ export default function ProjectDetailReviewClient({
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-3 pt-2">
-            {isClassSelectionDirty && (
+            {isClassSelectionDirty && project?.shariah_compliance_status !== "rejected" && (
               <span className="text-[11px] font-semibold text-indigo-700">
                 {assignedClass
                   ? `Unsaved change: Class ${assignedClass} → Class ${minClass}`
                   : `Class ${minClass} selected — not yet assigned`}
               </span>
             )}
-            {isClassSelectionDirty ? (
+            {project?.shariah_compliance_status === "rejected" ? (
+              <span className="text-xs font-bold text-red-600 bg-red-50 px-4 py-2 rounded-xl border border-red-200">
+                Classification disabled for Shariah non-compliant projects
+              </span>
+            ) : isClassSelectionDirty ? (
               <button
                 type="button"
                 onClick={() => handleAssignMinClass(minClass)}
@@ -1926,7 +2488,7 @@ export default function ProjectDetailReviewClient({
               </button>
             ) : (
               <span className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                 Class {assignedClass} Assigned
               </span>
             )}
@@ -2129,13 +2691,79 @@ export default function ProjectDetailReviewClient({
           </div>
         </div>
 
-        {isFinalDecisionDisabled && (
-          <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+        {isFinalDecisionDisabled ? (
+          <div className="p-5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 text-xs space-y-2.5">
+            <div className="flex items-center gap-2 font-extrabold text-amber-900">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+              <span>
+                {!isPendingReviewStatus
+                  ? "This project proposal has already been finalized."
+                  : "Final Decision Locked — Items Awaiting Review"}
+              </span>
+            </div>
+
+            {isPendingReviewStatus && (
+              <div className="space-y-1.5 pl-6">
+                <p className="text-amber-800 text-[11px] font-medium leading-relaxed">
+                  Before finalizing the overall project proposal, decisions must be submitted for all pending sections:
+                </p>
+                <ul className="list-disc list-inside space-y-1 text-xs text-amber-950 font-semibold">
+                  {pendingDocsCount > 0 && (
+                    <li>
+                      {pendingDocsCount} project document{pendingDocsCount !== 1 ? "s" : ""} left to review
+                    </li>
+                  )}
+                  {pendingMilestonesCount > 0 && (
+                    <li>
+                      {pendingMilestonesCount} project milestone{pendingMilestonesCount !== 1 ? "s" : ""} left to review
+                    </li>
+                  )}
+                  {pendingMediaCount > 0 && (
+                    <li>
+                      {pendingMediaCount} media file{pendingMediaCount !== 1 ? "s" : ""} left to review
+                    </li>
+                  )}
+                  {isCoverPending && (
+                    <li>
+                      1 campaign hero cover image left to review
+                    </li>
+                  )}
+                  {isSpvPending && (
+                    <li>
+                      SPV legal structure decision has not been provided
+                    </li>
+                  )}
+                  {isShariahPending && (
+                    <li>
+                      Shariah compliance audit decision has not been provided
+                    </li>
+                  )}
+                  {isClassPending && (
+                    <li>
+                      Minimum eligible investor class has not been assigned
+                    </li>
+                  )}
+                </ul>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div
+            className={`p-4 rounded-2xl border text-xs font-semibold flex items-center gap-2 ${
+              isPublishAllowed
+                ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                : "bg-amber-50 border-amber-200 text-amber-900"
+            }`}
+          >
+            {isPublishAllowed ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+            )}
             <span>
-              {!isPendingReviewStatus
-                ? "This project proposal has already been finalized."
-                : "All project documents, media files, and milestones must be decided before completing final review."}
+              {isPublishAllowed
+                ? "All project sections, documents, media, cover image, and milestones have been decided. You may now authorize campaign publication or send the project proposal back to the issuer."
+                : "All review decisions have been recorded. Because SPV details or Shariah compliance was rejected, publication is disabled. You may send the project back for revision or reject the proposal."}
             </span>
           </div>
         )}
@@ -2144,7 +2772,7 @@ export default function ProjectDetailReviewClient({
           <button
             onClick={() => setFinalDecisionModal("send_back")}
             disabled={isFinalDecisionDisabled || isPending}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-xs transition-all disabled:opacity-50"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-xs transition-all disabled:opacity-50 cursor-pointer"
           >
             <RotateCcw className="w-4 h-4 text-amber-600" />
             <span>Send Back for Revision</span>
@@ -2153,7 +2781,7 @@ export default function ProjectDetailReviewClient({
           <button
             onClick={() => setFinalDecisionModal("reject")}
             disabled={isFinalDecisionDisabled || isPending}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-xs transition-all disabled:opacity-50"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-xs transition-all disabled:opacity-50 cursor-pointer"
           >
             <XCircle className="w-4 h-4 text-red-600" />
             <span>Reject Project</span>
@@ -2163,10 +2791,16 @@ export default function ProjectDetailReviewClient({
             onClick={handleApproveFinalProject}
             disabled={
               isFinalDecisionDisabled ||
+              !isPublishAllowed ||
               isPending ||
               activeAction === "final_approve"
             }
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition-all shadow-md shadow-emerald-900/10 disabled:opacity-50"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition-all shadow-md shadow-emerald-900/10 disabled:opacity-50 cursor-pointer"
+            title={
+              !isPublishAllowed
+                ? "Cannot publish campaign: Requires approved SPV details, approved Shariah certification, and assigned minimum investor class."
+                : "Approve & Publish Project"
+            }
           >
             {activeAction === "final_approve" ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -2230,6 +2864,61 @@ export default function ProjectDetailReviewClient({
                   </span>
                 ) : (
                   "Confirm Rejection"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 1B: SPV DETAILS REJECTION REASON PROMPT */}
+      {rejectingSpvModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative animate-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <h3 className="text-sm font-extrabold text-red-900 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600" />
+                Reject SPV Legal Structure Details
+              </h3>
+              <button
+                onClick={() => setRejectingSpvModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-600 leading-relaxed">
+              Please specify the reason for rejecting the SPV details for{" "}
+              <strong>{spvDetails?.spv_legal_name || project?.title}</strong>. This feedback will be saved to the record and shown in the review portal:
+            </p>
+
+            <textarea
+              value={spvRejectionReason}
+              onChange={(e) => setSpvRejectionReason(e.target.value)}
+              placeholder="e.g., SPV registration number does not match regulatory authority registry, or authorized share capital terms are inconsistent."
+              rows={4}
+              className="w-full p-3 border border-red-200 rounded-xl text-xs text-gray-800 focus:ring-2 focus:ring-red-500 focus:outline-hidden"
+            />
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setRejectingSpvModalOpen(false)}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-100 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmRejectSpv}
+                disabled={activeAction === "reject_spv_details" || !spvRejectionReason.trim()}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {activeAction === "reject_spv_details" ? (
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Processing...
+                  </span>
+                ) : (
+                  "Confirm SPV Rejection"
                 )}
               </button>
             </div>
@@ -2324,7 +3013,7 @@ export default function ProjectDetailReviewClient({
                           className="flex flex-col sm:flex-row sm:items-start gap-2 py-2 border-b border-emerald-900/40 last:border-0"
                         >
                           <span className="text-emerald-400 font-bold shrink-0 sm:w-48">
-                            "{key}":
+                            &quot;{key}&quot;:
                           </span>
 
                           <div className="flex-1 min-w-0">
@@ -2353,7 +3042,7 @@ export default function ProjectDetailReviewClient({
                                       key={i}
                                       className="text-amber-200 text-[11px] leading-relaxed"
                                     >
-                                      "{String(item)}"
+                                      &quot;{String(item)}&quot;
                                       {i < value.length - 1 ? "," : ""}
                                     </div>
                                   ))}
@@ -2368,7 +3057,7 @@ export default function ProjectDetailReviewClient({
                               </pre>
                             ) : (
                               <span className="text-amber-200 leading-relaxed font-semibold">
-                                "{String(value)}"
+                                &quot;{String(value)}&quot;
                               </span>
                             )}
                             {!isLast && (

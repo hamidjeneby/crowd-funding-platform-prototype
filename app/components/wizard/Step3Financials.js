@@ -3,116 +3,16 @@
 import { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
 import { updateProjectDraft } from "@/app/actions/projects";
-import { ShieldCheck } from "lucide-react";
-
-const getYieldTypeForContract = (contractType) => {
-  switch (contractType) {
-    case "ijara":
-      return "rental";
-    case "murabaha":
-    case "mudarabah":
-      return "profit_margin";
-    case "spv_equity":
-      return "equity_appreciation";
-    default:
-      return undefined;
-  }
-};
-
-const createSchema = ({
-  isSpvEquity,
-  conversionEnabled,
-  conversionRatioShares,
-  totalSharesAuthorized,
-  conversionDeadline,
-}) =>
-  z
-    .object({
-      target_goal: z.coerce.number().min(1, "Target goal is required"),
-      soft_cap: z.coerce.number().min(1, "Soft cap is required"),
-      hard_cap: z.coerce.number().min(1, "Hard cap is required"),
-      min_investment_floor: z.coerce
-        .number()
-        .min(1, "Min investment floor is required")
-        .refine((val) => Number.isInteger(val), {
-          message: "Minimum investment floor must be a whole integer number",
-        }),
-      campaign_end_date: z.string().min(1, "Campaign deadline is required"),
-      unit_price: z.coerce.number().optional(),
-      expected_roi_percent: z.coerce.number().optional(),
-      yield_type: z.enum(["rental", "profit_margin", "equity_appreciation"], {
-        required_error: "Please select a yield type",
-      }),
-      currency: z.enum(["AED", "MYR", "USD", "IDR"], {
-        required_error: "Please select a currency",
-      }),
-      clearing_option: z.enum(
-        ["platform_clearing", "custody_provider_clearing"],
-        { required_error: "Please select a clearing option" },
-      ),
-    })
-    .superRefine((data, ctx) => {
-      if (data.soft_cap > data.target_goal) {
-        ctx.addIssue({
-          path: ["soft_cap"],
-          message: "Soft cap cannot be greater than target goal",
-          code: z.ZodIssueCode.custom,
-        });
-      }
-      if (data.soft_cap > data.hard_cap) {
-        ctx.addIssue({
-          path: ["soft_cap"],
-          message: "Soft cap cannot be greater than hard cap",
-          code: z.ZodIssueCode.custom,
-        });
-      }
-      if (data.hard_cap < data.target_goal) {
-        ctx.addIssue({
-          path: ["hard_cap"],
-          message: "Hard cap must be equal to or greater than target goal",
-          code: z.ZodIssueCode.custom,
-        });
-      }
-
-      // Check minimum target_goal based on total_cost_authorized for conversion enabled non-SPV Equity projects
-      if (
-        !isSpvEquity &&
-        conversionEnabled &&
-        conversionRatioShares > 0 &&
-        totalSharesAuthorized > 0 &&
-        data.unit_price > 0
-      ) {
-        const totalCostAuth = (data.unit_price / conversionRatioShares) * totalSharesAuthorized;
-        if (data.target_goal < totalCostAuth) {
-          const currPrefix = data.currency ? `${data.currency} ` : "";
-          ctx.addIssue({
-            path: ["target_goal"],
-            message: `Target goal cannot be less than the Total Authorized Cost (${currPrefix}${totalCostAuth.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) based on conversion terms.`,
-            code: z.ZodIssueCode.custom,
-          });
-        }
-      }
-
-      // Check campaign_end_date vs conversion_deadline
-      if (conversionEnabled && conversionDeadline && data.campaign_end_date) {
-        const campaignDateStr = data.campaign_end_date.endsWith("Z") ? data.campaign_end_date : `${data.campaign_end_date}:00.000Z`;
-        const convDateStr = conversionDeadline.endsWith("Z") ? conversionDeadline : `${conversionDeadline}T00:00:00.000Z`;
-        const campaignDate = new Date(campaignDateStr);
-        const convDate = new Date(convDateStr);
-
-        if (!isNaN(campaignDate.getTime()) && !isNaN(convDate.getTime())) {
-          if (campaignDate >= convDate) {
-            ctx.addIssue({
-              path: ["campaign_end_date"],
-              message: "The campaign end date cannot be later than or equal to the conversion deadline. Please go back to Step 2 to change the conversion deadline or choose an earlier campaign end date.",
-              code: z.ZodIssueCode.custom,
-            });
-          }
-        }
-      }
-    });
+import { ShieldCheck, AlertTriangle } from "lucide-react";
+import {
+  getYieldTypeForContract,
+  getYieldTypeExplanation,
+  getRoiLabelForContract,
+  getRoiHelperForContract,
+  createStep3FinancialsSchema,
+  cleanContractTerms,
+} from "@/lib/validation/repaymentTermsSchema";
 
 function formatForDatetimeInput(isoString) {
   if (!isoString) return "";
@@ -148,18 +48,66 @@ export default function Step3Financials({
   const conversionRatioShares = Number(spvDetail?.conversion_ratio_shares) || 0;
   const conversionDeadline = spvDetail?.conversion_deadline || initialData?.conversion_deadline;
 
+  const hasMissingRepaymentTerms =
+    initialData &&
+    (!initialData.contract_terms ||
+      (!isSpvEquity && (!initialData.tenor_months || Number(initialData.tenor_months) <= 0)));
+
   const schema = useMemo(
     () =>
-      createSchema({
-        isSpvEquity,
+      createStep3FinancialsSchema({
+        shariaContractType,
         conversionEnabled,
         conversionRatioShares,
         totalSharesAuthorized,
         conversionDeadline,
       }),
-    [isSpvEquity, conversionEnabled, conversionRatioShares, totalSharesAuthorized, conversionDeadline]
+    [shariaContractType, conversionEnabled, conversionRatioShares, totalSharesAuthorized, conversionDeadline]
   );
 
+  const defaultContractTerms = useMemo(() => {
+    const raw = initialData?.contract_terms;
+    let existing = {};
+    if (raw) {
+      existing = typeof raw === "string" ? JSON.parse(raw) : raw;
+    }
+
+    if (shariaContractType === "murabaha") {
+      return {
+        payment_frequency: existing.payment_frequency || "quarterly",
+        principal_repayment: existing.principal_repayment || "at_maturity",
+        asset_description: existing.asset_description || "",
+      };
+    }
+
+    if (shariaContractType === "ijara") {
+      return {
+        payment_frequency: existing.payment_frequency || "quarterly",
+        asset_description: existing.asset_description || "",
+        asset_value: existing.asset_value ?? "",
+        end_of_term: existing.end_of_term || "sale_to_issuer",
+        end_of_term_price: existing.end_of_term_price ?? "",
+      };
+    }
+
+    if (shariaContractType === "mudarabah") {
+      return {
+        investor_profit_share_percent: existing.investor_profit_share_percent ?? "",
+        profit_reporting_frequency: existing.profit_reporting_frequency || "quarterly",
+      };
+    }
+
+    if (shariaContractType === "spv_equity") {
+      return {
+        existing_shares_outstanding: existing.existing_shares_outstanding ?? "",
+        voting_rights: existing.voting_rights ?? false,
+        dividend_policy: existing.dividend_policy || "discretionary",
+        target_exit_horizon_years: existing.target_exit_horizon_years ?? "",
+      };
+    }
+
+    return {};
+  }, [initialData?.contract_terms, shariaContractType]);
 
   const {
     register,
@@ -177,17 +125,21 @@ export default function Step3Financials({
       campaign_end_date: formatForDatetimeInput(initialData?.campaign_end_date),
       unit_price: initialData?.unit_price || "",
       expected_roi_percent: isSpvEquity
-        ? initialData?.expected_roi_percent ?? 0
-        : initialData?.expected_roi_percent || "",
+        ? ""
+        : (initialData?.expected_roi_percent ?? ""),
       yield_type: lockedYieldType || initialData?.yield_type || undefined,
       currency: initialData?.currency || undefined,
       clearing_option: initialData?.clearing_option || undefined,
+      tenor_months: isSpvEquity ? "" : (initialData?.tenor_months ?? ""),
+      contract_terms: defaultContractTerms,
     },
   });
 
   const unitPrice = watch("unit_price");
   const selectedCurrency = watch("currency");
   const currencyPrefix = selectedCurrency ? `${selectedCurrency} ` : "";
+  const endOfTermChoice = watch("contract_terms.end_of_term");
+  const investorProfitShare = watch("contract_terms.investor_profit_share_percent");
 
   useEffect(() => {
     if (lockedYieldType) {
@@ -209,13 +161,14 @@ export default function Step3Financials({
     setLoading(true);
     setError(null);
 
-    const finalYieldType = lockedYieldType || data.yield_type;
+    const cleanedTerms = cleanContractTerms(shariaContractType, data.contract_terms);
+    const finalYieldType = lockedYieldType || getYieldTypeForContract(shariaContractType);
     const finalData = {
       ...data,
       yield_type: finalYieldType,
-      expected_roi_percent: isSpvEquity
-        ? data.expected_roi_percent || 0
-        : data.expected_roi_percent,
+      tenor_months: isSpvEquity ? null : Number(data.tenor_months),
+      contract_terms: cleanedTerms,
+      expected_roi_percent: isSpvEquity ? null : Number(data.expected_roi_percent),
     };
 
     try {
@@ -223,10 +176,44 @@ export default function Step3Financials({
       await onUpdate();
       onNext(res);
     } catch (err) {
-      setError(err.message || "Failed to save");
+      console.error("Step 3 save error:", err);
+      const isCodeError =
+        !err?.message ||
+        err.message.includes("is not defined") ||
+        err.message.includes("Cannot read") ||
+        err.name === "ReferenceError" ||
+        err.name === "TypeError";
+      setError(
+        isCodeError
+          ? "Something went wrong while saving. Please try again or contact support."
+          : err.message
+      );
     } finally {
       setLoading(false);
     }
+  };
+
+  const onInvalid = (formErrors) => {
+    console.warn("Step 3 form validation errors:", formErrors);
+    let firstMessage = null;
+    if (formErrors.contract_terms) {
+      if (typeof formErrors.contract_terms.message === "string") {
+        firstMessage = formErrors.contract_terms.message;
+      } else {
+        const firstNested = Object.values(formErrors.contract_terms)[0];
+        if (firstNested?.message) firstMessage = firstNested.message;
+      }
+    }
+    if (!firstMessage) {
+      for (const k of Object.keys(formErrors)) {
+        if (formErrors[k]?.message) {
+          firstMessage = formErrors[k].message;
+          break;
+        }
+      }
+    }
+    setError(firstMessage || "Please fill in all required financial terms before continuing.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const currentUnitPrice = Number(unitPrice) || 0;
@@ -242,11 +229,11 @@ export default function Step3Financials({
         e.preventDefault();
         onNext();
       }
-    : handleSubmit(onSubmit);
+    : handleSubmit(onSubmit, onInvalid);
 
   return (
     <form onSubmit={handleFormSubmit} className="space-y-6">
-      <h2 className="text-xl font-semibold">Financial Terms</h2>
+      <h2 className="text-xl font-semibold text-[#064e3b]">Financial Terms</h2>
 
       {isShariahApproved && (
         <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2">
@@ -255,13 +242,13 @@ export default function Step3Financials({
         </div>
       )}
 
-      {error && <p className="text-red-500">{error}</p>}
+      {error && <p className="text-red-500 text-sm font-medium">{error}</p>}
 
       {isSpvEquity && (
         <div className="p-4 rounded-md bg-emerald-50 border border-emerald-200 text-sm text-emerald-900">
           <p className="font-semibold">SPV Equity Calculation Active</p>
           <p className="text-xs text-emerald-700 mt-1">
-            Target Goal and Hard Cap are autocalculated as Share Price × Total Authorized Shares ({totalSharesAuthorized.toLocaleString()} shares). Yield Type is locked to Equity Appreciation.
+            Target Goal and Hard Cap are autocalculated as Share Price × Shares Offered ({totalSharesAuthorized.toLocaleString()} shares). Yield Type is locked to Equity Appreciation.
           </p>
         </div>
       )}
@@ -383,9 +370,13 @@ export default function Step3Financials({
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700">Campaign Deadline (End Date & Time)</label>
+          <label className="block text-sm font-medium text-gray-700">Campaign Deadline (End Date &amp; Time) (UTC)</label>
+          <p className="text-xs text-gray-500 mb-1">
+            Deadline must be on the hour in UTC (e.g. 14:00). Minutes and seconds must be 00.
+          </p>
           <input
             type="datetime-local"
+            step="3600"
             {...register("campaign_end_date")}
             disabled={isFinancialsLocked}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border bg-white text-sm"
@@ -395,10 +386,20 @@ export default function Step3Financials({
 
         {!isSpvEquity && (
           <div>
-            <label className="block text-sm font-medium text-gray-700">Expected ROI (%)</label>
+            <label className="block text-sm font-medium text-gray-700">
+              {getRoiLabelForContract(shariaContractType)}
+            </label>
+            {getRoiHelperForContract(shariaContractType) && (
+              <p className="text-xs text-gray-500 mb-1">
+                {getRoiHelperForContract(shariaContractType)}
+              </p>
+            )}
             <input
               type="number"
               step="0.01"
+              min="0.01"
+              max="100"
+              placeholder="e.g. 12.5"
               {...register("expected_roi_percent")}
               disabled={isFinancialsLocked}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
@@ -407,22 +408,23 @@ export default function Step3Financials({
           </div>
         )}
 
-        <div>
+        {/* Read-Only Yield Type Card */}
+        <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-1">
           <label className="block text-sm font-medium text-gray-700">
-            Yield Type {lockedYieldType && "(Locked)"}
+            Yield Type (Derived)
           </label>
-          <select
-            {...register("yield_type")}
-            disabled={disabled || Boolean(lockedYieldType)}
-            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border ${
-              lockedYieldType ? "bg-gray-100 text-gray-700 font-semibold cursor-not-allowed" : "bg-white"
-            }`}
-          >
-            <option value="">Select yield type...</option>
-            <option value="rental">Rental</option>
-            <option value="profit_margin">Profit Margin</option>
-            <option value="equity_appreciation">Equity Appreciation</option>
-          </select>
+          <div className="flex items-center gap-2">
+            <span className="font-extrabold text-[#064e3b] text-base capitalize">
+              {lockedYieldType?.replace("_", " ") || "Not set"}
+            </span>
+            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-100 text-[#064e3b]">
+              Locked to {shariaContractType?.replace("_", " ") || "Contract"}
+            </span>
+          </div>
+          <p className="text-xs text-gray-500 pt-1 leading-relaxed">
+            {getYieldTypeExplanation(lockedYieldType)}
+          </p>
+          <input type="hidden" {...register("yield_type")} />
           {errors.yield_type && <p className="mt-1 text-sm text-red-600">{errors.yield_type.message}</p>}
         </div>
 
@@ -441,11 +443,392 @@ export default function Step3Financials({
         </div>
       </div>
 
+      {/* SECTION: REPAYMENT TERMS */}
+      <div className="pt-6 border-t border-gray-200 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-3">
+          <div>
+            <h3 className="text-lg font-bold text-[#064e3b]">Repayment Terms</h3>
+            <p className="text-xs text-gray-500">
+              Contract-specific terms defining how and when investors receive distributions or returns.
+            </p>
+          </div>
+          <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-50 text-[#064e3b] border border-emerald-200 w-fit">
+            {shariaContractType?.replace("_", " ") || "Standard"}
+          </span>
+        </div>
+
+        {errors.contract_terms?.message && (
+          <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl font-medium">
+            {errors.contract_terms.message}
+          </div>
+        )}
+
+        {/* Missing Repayment Terms Warning for existing drafts */}
+        {hasMissingRepaymentTerms && (
+          <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs space-y-1">
+            <div className="flex items-center gap-1.5 font-bold text-amber-950">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Repayment Terms Incomplete</span>
+            </div>
+            <p className="leading-relaxed font-medium">
+              This project is currently missing required repayment terms. Please fill in the terms below to submit your project for review.
+            </p>
+          </div>
+        )}
+
+        {/* Tenor input for non-equity */}
+        {!isSpvEquity && (
+          <div className="bg-gray-50/70 p-4 rounded-2xl border border-gray-200 space-y-1.5">
+            <label className="block text-sm font-semibold text-gray-900">
+              Investment Term / Tenor (Months) <span className="text-red-500">*</span>
+            </label>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              The duration of the investment in months (1–120 months / up to 10 years). The term must be a whole multiple of your chosen payment or reporting frequency.
+            </p>
+            <input
+              type="number"
+              step="1"
+              min="1"
+              max="120"
+              placeholder="e.g. 12, 24, 36"
+              {...register("tenor_months")}
+              disabled={isFinancialsLocked}
+              className="mt-1 block w-full sm:max-w-xs rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border bg-white font-medium"
+            />
+            {errors.tenor_months && (
+              <p className="mt-1 text-sm text-red-600">{errors.tenor_months.message}</p>
+            )}
+          </div>
+        )}
+
+        {/* Murabaha Terms */}
+        {shariaContractType === "murabaha" && (
+          <div className="space-y-4 bg-white p-5 rounded-2xl border border-gray-200 shadow-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Payment Frequency <span className="text-red-500">*</span>
+                </label>
+                <select
+                  {...register("contract_terms.payment_frequency")}
+                  disabled={isFinancialsLocked}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border bg-white"
+                >
+                  <option value="">Select frequency...</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="semi_annual">Semi-Annual</option>
+                  <option value="annual">Annual</option>
+                  <option value="at_maturity">At Maturity (Bullet)</option>
+                </select>
+                {errors.contract_terms?.payment_frequency && (
+                  <p className="mt-1 text-sm text-red-600">{errors.contract_terms.payment_frequency.message}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Principal Repayment <span className="text-red-500">*</span>
+                </label>
+                <select
+                  {...register("contract_terms.principal_repayment")}
+                  disabled={isFinancialsLocked}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border bg-white"
+                >
+                  <option value="">Select repayment method...</option>
+                  <option value="with_instalments">With Instalments (Amortizing)</option>
+                  <option value="at_maturity">At Maturity (Bullet Repayment)</option>
+                </select>
+                {errors.contract_terms?.principal_repayment && (
+                  <p className="mt-1 text-sm text-red-600">{errors.contract_terms.principal_repayment.message}</p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                Asset Description (Purchased Goods) <span className="text-red-500">*</span>
+              </label>
+              <p className="text-xs text-gray-500 mb-1">
+                Describe the underlying commodities, inventory, equipment, or assets being purchased under Murabaha (10–500 characters).
+              </p>
+              <textarea
+                rows={3}
+                placeholder="e.g., Commercial equipment and industrial machinery for production expansion..."
+                {...register("contract_terms.asset_description")}
+                disabled={isFinancialsLocked}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
+              />
+              {errors.contract_terms?.asset_description && (
+                <p className="mt-1 text-sm text-red-600">{errors.contract_terms.asset_description.message}</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Ijara Terms */}
+        {shariaContractType === "ijara" && (
+          <div className="space-y-4 bg-white p-5 rounded-2xl border border-gray-200 shadow-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Rent Payment Frequency <span className="text-red-500">*</span>
+                </label>
+                <select
+                  {...register("contract_terms.payment_frequency")}
+                  disabled={isFinancialsLocked}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border bg-white"
+                >
+                  <option value="">Select rent frequency...</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="semi_annual">Semi-Annual</option>
+                  <option value="annual">Annual</option>
+                </select>
+                {errors.contract_terms?.payment_frequency && (
+                  <p className="mt-1 text-sm text-red-600">{errors.contract_terms.payment_frequency.message}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Asset Value ({selectedCurrency || "Currency"}) <span className="text-red-500">*</span>
+                </label>
+                <p className="text-xs text-gray-500 mb-1">
+                  Total valuation of the underlying leased asset. Must cover the Target Goal.
+                </p>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="e.g. 5000000"
+                  {...register("contract_terms.asset_value")}
+                  disabled={isFinancialsLocked}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
+                />
+                {errors.contract_terms?.asset_value && (
+                  <p className="mt-1 text-sm text-red-600">{errors.contract_terms.asset_value.message}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  End of Term Outcome <span className="text-red-500">*</span>
+                </label>
+                <select
+                  {...register("contract_terms.end_of_term")}
+                  disabled={isFinancialsLocked}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border bg-white"
+                >
+                  <option value="">Select outcome...</option>
+                  <option value="sale_to_issuer">Sale to Issuer (Asset Transfer)</option>
+                  <option value="sale_to_third_party">Sale to Third Party</option>
+                  <option value="return_asset">Return Asset to SPV / Investors</option>
+                </select>
+                {errors.contract_terms?.end_of_term && (
+                  <p className="mt-1 text-sm text-red-600">{errors.contract_terms.end_of_term.message}</p>
+                )}
+              </div>
+
+              {endOfTermChoice === "sale_to_issuer" && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    End of Term Purchase Price ({selectedCurrency || "Currency"}) <span className="text-red-500">*</span>
+                  </label>
+                  <p className="text-xs text-gray-500 mb-1">
+                    Pre-agreed asset transfer / buyout price at lease expiry.
+                  </p>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="e.g. 1000"
+                    {...register("contract_terms.end_of_term_price")}
+                    disabled={isFinancialsLocked}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
+                  />
+                  {errors.contract_terms?.end_of_term_price && (
+                    <p className="mt-1 text-sm text-red-600">{errors.contract_terms.end_of_term_price.message}</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                Leased Asset Description <span className="text-red-500">*</span>
+              </label>
+              <p className="text-xs text-gray-500 mb-1">
+                Describe the underlying leased property, infrastructure, or machinery (10–500 characters).
+              </p>
+              <textarea
+                rows={3}
+                placeholder="e.g., Commercial warehouse facility and logistics depot located at..."
+                {...register("contract_terms.asset_description")}
+                disabled={isFinancialsLocked}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
+              />
+              {errors.contract_terms?.asset_description && (
+                <p className="mt-1 text-sm text-red-600">{errors.contract_terms.asset_description.message}</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Mudarabah Terms */}
+        {shariaContractType === "mudarabah" && (
+          <div className="space-y-4 bg-white p-5 rounded-2xl border border-gray-200 shadow-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Investor Profit Share (%) <span className="text-red-500">*</span>
+                </label>
+                <p className="text-xs text-gray-500 mb-1">
+                  Share of net venture profit allocated to investors (&gt;0% and &lt;100%).
+                </p>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  max="99.99"
+                  placeholder="e.g. 70"
+                  {...register("contract_terms.investor_profit_share_percent")}
+                  disabled={isFinancialsLocked}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
+                />
+                {errors.contract_terms?.investor_profit_share_percent && (
+                  <p className="mt-1 text-sm text-red-600">
+                    {errors.contract_terms.investor_profit_share_percent.message}
+                  </p>
+                )}
+                {investorProfitShare > 0 && investorProfitShare < 100 && (
+                  <p className="text-xs text-emerald-700 font-semibold mt-1">
+                    Issuer (Mudarib) retains: {(100 - Number(investorProfitShare)).toFixed(2)}%
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Profit Reporting Frequency <span className="text-red-500">*</span>
+                </label>
+                <p className="text-xs text-gray-500 mb-1">
+                  Frequency of audited or verified profit/loss reporting to investors.
+                </p>
+                <select
+                  {...register("contract_terms.profit_reporting_frequency")}
+                  disabled={isFinancialsLocked}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border bg-white"
+                >
+                  <option value="">Select reporting frequency...</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="semi_annual">Semi-Annual</option>
+                  <option value="annual">Annual</option>
+                </select>
+                {errors.contract_terms?.profit_reporting_frequency && (
+                  <p className="mt-1 text-sm text-red-600">
+                    {errors.contract_terms.profit_reporting_frequency.message}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SPV Equity Terms */}
+        {shariaContractType === "spv_equity" && (
+          <div className="space-y-4 bg-white p-5 rounded-2xl border border-gray-200 shadow-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Existing Shares Outstanding <span className="text-red-500">*</span>
+                </label>
+                <p className="text-xs text-gray-500 mb-1">
+                  Total company shares already issued prior to this campaign raise.
+                </p>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  placeholder="e.g. 500000"
+                  {...register("contract_terms.existing_shares_outstanding")}
+                  disabled={isFinancialsLocked}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
+                />
+                {errors.contract_terms?.existing_shares_outstanding && (
+                  <p className="mt-1 text-sm text-red-600">
+                    {errors.contract_terms.existing_shares_outstanding.message}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Dividend Policy (Optional)
+                </label>
+                <p className="text-xs text-gray-500 mb-1">
+                  Stated policy on dividend payments.
+                </p>
+                <select
+                  {...register("contract_terms.dividend_policy")}
+                  disabled={isFinancialsLocked}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border bg-white"
+                >
+                  <option value="">Select dividend policy...</option>
+                  <option value="none_planned">None Planned (Profits Reinvested for Growth)</option>
+                  <option value="discretionary">Discretionary (Board Declared)</option>
+                  <option value="target_payout">Target Payout</option>
+                </select>
+                {errors.contract_terms?.dividend_policy && (
+                  <p className="mt-1 text-sm text-red-600">{errors.contract_terms.dividend_policy.message}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Target Exit Horizon (Years, Optional)
+                </label>
+                <p className="text-xs text-gray-500 mb-1">
+                  Targeted timeframe for IPO, trade sale, or buyback (1–30 years).
+                </p>
+                <input
+                  type="number"
+                  step="1"
+                  min="1"
+                  max="30"
+                  placeholder="e.g. 5"
+                  {...register("contract_terms.target_exit_horizon_years")}
+                  disabled={isFinancialsLocked}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
+                />
+                {errors.contract_terms?.target_exit_horizon_years && (
+                  <p className="mt-1 text-sm text-red-600">
+                    {errors.contract_terms.target_exit_horizon_years.message}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center pt-6">
+                <input
+                  type="checkbox"
+                  id="voting_rights"
+                  {...register("contract_terms.voting_rights")}
+                  disabled={isFinancialsLocked}
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <label htmlFor="voting_rights" className="ml-2 block text-sm font-medium text-gray-900">
+                  Shares carry voting rights
+                </label>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="flex justify-between mt-8">
         <button
           type="button"
           onClick={onPrev}
-          className="py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+          className="py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 cursor-pointer"
         >
           Back
         </button>

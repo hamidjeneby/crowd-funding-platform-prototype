@@ -33,7 +33,7 @@ deciding whether it lives on `projects` or on the holding itself.
 | Metric                         | Source                                                                                                           |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
 | Total capital deployed         | `SUM(allocated_amount)` where status IN (allocated, active, completed)                                           |
-| Pending (awaiting allocation)  | `SUM(pledged_amount)` where status = pending — kept separate, since this money could still be partially rejected |
+| Pending (awaiting allocation)  | `SUM(pledged_amount)` where status = pending — kept separate, since this money represents conditional requests pending priority allocation at close |
 | Total returns received to date | `SUM(distributions.amount)` across all holdings                                                                  |
 | Total fees paid                | `SUM(fee_amount)` across all pledges — transparency metric                                                       |
 | Active positions               | Count of pledges with status IN (allocated, active)                                                              |
@@ -92,8 +92,8 @@ metric entirely: unrealized gain/loss.**
   the one number an investor is actively watching.
 - **Conversion eligibility summary**: `conversion_eligible_units` for this
   holding, and what portion of the total pledge that represents (recall the
-  per-class cap and shared-pool mechanics from earlier — this number may be
-  less than their full holding).
+  per-class cap and priority allocation mechanics from campaign close — this number may be
+  less than their full holding if oversubscribed).
 - **Already-converted holdings**: shown distinctly from cash Sukuk holdings,
   with share count and current estimated value based on the latest valuation
   — these behave like equity from this point forward, not like Sukuk anymore.
@@ -102,11 +102,11 @@ metric entirely: unrealized gain/loss.**
 
 ## 5. Pledge status breakdown
 
-**Chart: small bar or donut.** Count of pledges by status (pending / allocated
-/ active / completed / cancelled / refunded). Useful specifically because
-`pending` pledges are still at risk of partial or full rejection under
-oversubscription — this chart makes that risk visible rather than implying
-every pledge is a done deal.
+**Chart: small bar or donut.** Count of pledges by status (`pending` [pending allocation] /
+`allocated` / `rejected_oversubscribed` [not allocated, refunded] / `active` / `completed` / `cancelled` / `refunded`).
+Useful specifically because `pending` pledges are investment requests evaluated at campaign close
+by priority (Investor Class first, then Amount, then `pledged_at`) — this chart makes the lifecycle state
+transparent rather than implying every submitted pledge is guaranteed.
 
 ---
 

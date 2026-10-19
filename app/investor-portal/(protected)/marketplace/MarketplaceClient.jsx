@@ -193,7 +193,8 @@ export default function MarketplaceClient({
             const targetGoal = Number(project.target_goal) || 0;
             const raised = Number(project.live_raised_amount) || 0;
             const rawPercent = targetGoal > 0 ? (raised / targetGoal) * 100 : 0;
-            const progressPercent = Math.min(rawPercent, 100).toFixed(1);
+            const progressPercent = rawPercent.toFixed(1);
+            const clampedBarPercent = Math.min(rawPercent, 100).toFixed(1);
             const minFloor = Number(project.min_investment_floor) || 0;
 
             const isPendingReview = project.status === "pending_review";
@@ -208,7 +209,9 @@ export default function MarketplaceClient({
             const conversionRatioShares = Number(spvDetails?.conversion_ratio_shares) || 1;
             const totalConvertibleUnits = conversionRatioShares > 0 ? Math.floor(totalSharesAuthorized / conversionRatioShares) : 0;
             const pledgedConvertedUnits = Number(project.live_conversion_units) || 0;
-            const conversionPercent = totalConvertibleUnits > 0 ? Math.min((pledgedConvertedUnits / totalConvertibleUnits) * 100, 100).toFixed(1) : 0;
+            const rawConversionPercent = totalConvertibleUnits > 0 ? (pledgedConvertedUnits / totalConvertibleUnits) * 100 : 0;
+            const conversionPercent = rawConversionPercent.toFixed(1);
+            const clampedConversionBar = Math.min(rawConversionPercent, 100).toFixed(1);
 
             return (
               <div
@@ -277,9 +280,17 @@ export default function MarketplaceClient({
                   {/* Funding Progress Section */}
                   <div className="space-y-2 pt-2 border-t border-gray-100">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-500 font-medium">
-                        Funding Progress ({progressPercent}%)
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-gray-500 font-medium">
+                          {/* NOTE: switches to 'Funded' post-allocation */}
+                          {progressPercent}% Subscribed
+                        </span>
+                        {rawPercent > 100 && (
+                          <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-extrabold text-[9px] uppercase tracking-wider border border-amber-300">
+                            Oversubscribed
+                          </span>
+                        )}
+                      </div>
                       <span className="font-bold text-[#064e3b]">
                         {currency} {raised.toLocaleString()} /{" "}
                         {targetGoal.toLocaleString()}
@@ -289,7 +300,7 @@ export default function MarketplaceClient({
                     <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-gradient-to-r from-[#059669] to-[#047857] rounded-full transition-all duration-500"
-                        style={{ width: `${progressPercent}%` }}
+                        style={{ width: `${clampedBarPercent}%` }}
                       />
                     </div>
 
@@ -298,16 +309,16 @@ export default function MarketplaceClient({
                       <div className="pt-2 space-y-1">
                         <div className="flex items-center justify-between text-[11px]">
                           <span className="text-[#064e3b] font-bold flex items-center gap-1">
-                            <Sparkles className="w-3 h-3 text-[#059669]" /> Conversion Pool ({conversionPercent}%)
+                            <Sparkles className="w-3 h-3 text-[#059669]" /> Conversion pool demand ({conversionPercent}%)
                           </span>
                           <span className="font-bold text-[#064e3b]">
-                            {pledgedConvertedUnits.toLocaleString()} / {totalConvertibleUnits.toLocaleString()} units
+                            {pledgedConvertedUnits.toLocaleString()} / {totalConvertibleUnits.toLocaleString()} convertible units
                           </span>
                         </div>
                         <div className="w-full h-2 bg-emerald-50 rounded-full overflow-hidden border border-emerald-100">
                           <div
                             className="h-full bg-gradient-to-r from-[#059669] to-[#047857] rounded-full transition-all duration-500"
-                            style={{ width: `${conversionPercent}%` }}
+                            style={{ width: `${clampedConversionBar}%` }}
                           />
                         </div>
                       </div>

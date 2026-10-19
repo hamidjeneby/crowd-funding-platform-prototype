@@ -139,6 +139,20 @@ export async function topUpWallet(amount) {
     return { success: false, error: "Failed to update wallet balance." };
   }
 
+  const { error: txError } = await supabaseAdmin
+    .from("wallet_transactions")
+    .insert({
+      investor_id: investorId,
+      pledge_id: null,
+      type: "top_up",
+      amount: numericAmount,
+      balance_after: newBalance,
+    });
+
+  if (txError) {
+    console.error("Error inserting wallet_transactions top_up row:", txError);
+  }
+
   revalidatePath("/investor-portal");
   revalidatePath("/investor-portal/wallet");
 
@@ -338,11 +352,13 @@ export async function getInvestorHoldingsAndPledges() {
   const allPledges = pledgesData || [];
 
   // Separate pledges vs holdings according to status field:
-  // - status === "pending": Active pledge
+  // - status in ["pending", "rejected_oversubscribed", "refunded"]: Pledges tab (pending allocation, not allocated, or refunded)
   // - status in ["allocated", "active", "completed"]: Portfolio holding (uses allocated_amount)
-  // - status in ["cancelled", "refunded"]: Excluded entirely
+  // - status === "cancelled": Excluded
   const pledges = allPledges.filter(
-    (p) => p.status && p.status.toLowerCase() === "pending"
+    (p) =>
+      p.status &&
+      ["pending", "rejected_oversubscribed", "refunded"].includes(p.status.toLowerCase())
   );
 
   const holdings = allPledges.filter(
@@ -391,7 +407,7 @@ export async function getInvestorMilestonesPageData() {
   }
 
   const validPledges = (pledgesData || []).filter(
-    (p) => !["cancelled", "refunded"].includes((p.status || "").toLowerCase())
+    (p) => !["cancelled", "refunded", "rejected_oversubscribed"].includes((p.status || "").toLowerCase())
   );
 
   // 2. Group pledges by project ID

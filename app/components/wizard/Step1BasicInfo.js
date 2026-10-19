@@ -163,10 +163,21 @@ export default function Step1BasicInfo({
       };
 
       const res = await updateProjectDraft(projectId, payload, 1);
-      await onUpdate();
+      await onUpdate(res?.slug || projectId);
       onNext(res);
     } catch (err) {
-      setError(err.message || "Failed to save");
+      console.error("Step 1 save error:", err);
+      const isCodeError =
+        !err?.message ||
+        err.message.includes("is not defined") ||
+        err.message.includes("Cannot read") ||
+        err.name === "ReferenceError" ||
+        err.name === "TypeError";
+      setError(
+        isCodeError
+          ? "Something went wrong while saving. Please try again or contact support."
+          : err.message
+      );
     } finally {
       setLoading(false);
     }

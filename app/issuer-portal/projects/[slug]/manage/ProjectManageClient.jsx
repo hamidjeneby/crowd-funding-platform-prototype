@@ -136,7 +136,19 @@ export default function ProjectManageClient({ data }) {
             <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-[#064e3b] font-bold text-[10px] uppercase border border-emerald-200">
               Project Management Hub
             </span>
-            <span className="px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 font-bold text-[10px] uppercase border border-amber-200">
+            <span
+              className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] uppercase border ${
+                project.status === "funded"
+                  ? "bg-teal-100 text-teal-900 border-teal-300"
+                  : project.status === "failed"
+                    ? "bg-rose-100 text-rose-900 border-rose-300"
+                    : project.status === "closing"
+                      ? "bg-amber-100 text-amber-900 border-amber-300"
+                      : project.status === "campaign_live"
+                        ? "bg-emerald-100 text-emerald-900 border-emerald-300"
+                        : "bg-amber-50 text-amber-800 border-amber-200"
+              }`}
+            >
               {project.status?.replace("_", " ")}
             </span>
           </div>

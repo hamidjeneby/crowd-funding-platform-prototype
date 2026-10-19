@@ -1,11 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { submitProjectForReview } from "@/app/actions/projects";
-import { CheckCircle, FileText, Image as ImageIcon, Loader2, AlertCircle, Flag, Calendar } from "lucide-react";
+import { CheckCircle, CheckCircle2, ArrowRight, FileText, Image as ImageIcon, Loader2, AlertCircle, Flag, Calendar } from "lucide-react";
 import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
 import { useUpload } from "@/app/components/wizard/UploadProvider";
+
+import { getRoiLabelForContract } from "@/lib/validation/repaymentTermsSchema";
 
 const md = new MarkdownIt({ html: true, breaks: true });
 
@@ -42,7 +45,9 @@ function formatUtcDateOnly(dateString) {
 }
 
 export default function Step6Preview({ projectId, projectData, onPrev, jumpToStep, disabled, onSuccess }) {
+  const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [error, setError] = useState(null);
   const [missing, setMissing] = useState([]);
   const { hasActiveUploads, uploads, uploadingCount, hasFinishedUploads } = useUpload();
@@ -60,7 +65,7 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
     try {
       const res = await submitProjectForReview(projectId);
       if (res.success) {
-        onSuccess();
+        setShowSuccessModal(true);
       } else if (res.missingFields) {
         setMissing(res.missingFields);
         setError("The form is incomplete. Please fill out the missing fields in the following sections:");
@@ -68,7 +73,18 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (err) {
-      setError(err.message || "Failed to submit project.");
+      console.error("Step 6 submit error:", err);
+      const isCodeError =
+        !err?.message ||
+        err.message.includes("is not defined") ||
+        err.message.includes("Cannot read") ||
+        err.name === "ReferenceError" ||
+        err.name === "TypeError";
+      setError(
+        isCodeError
+          ? "Something went wrong while submitting the project. Please try again or contact support."
+          : err.message
+      );
     } finally {
       setSubmitting(false);
     }
@@ -87,10 +103,35 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
     }
   });
 
+  const contractTerms = (() => {
+    if (!projectData?.contract_terms) return null;
+    if (typeof projectData.contract_terms === "object") return projectData.contract_terms;
+    try {
+      return JSON.parse(projectData.contract_terms);
+    } catch {
+      return null;
+    }
+  })();
+
   const getSectionForField = (field) => {
     if (["title", "full_description", "summary"].includes(field)) return "Basic Info";
     if (["sharia_contract_type"].includes(field)) return "Structure & Compliance";
-    if (["target_goal", "soft_cap", "hard_cap", "min_investment_floor", "expected_roi_percent", "yield_type", "currency", "clearing_option", "campaign_end_date"].includes(field)) return "Financial Terms";
+    if (
+      [
+        "target_goal",
+        "soft_cap",
+        "hard_cap",
+        "min_investment_floor",
+        "expected_roi_percent",
+        "yield_type",
+        "currency",
+        "clearing_option",
+        "campaign_end_date",
+        "tenor_months",
+        "contract_terms",
+      ].includes(field)
+    )
+      return "Financial Terms";
     if (field.includes("doc")) return "Documents";
     if (field === "project_media") return "Media";
     return "Other";
@@ -264,6 +305,31 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
             </div>
             {projectData?.is_spv && projectData?.spv_details && projectData.spv_details.length > 0 && (
               <>
+                {(() => {
+                  const spvRow = projectData.spv_details[0];
+                  const hasRejection =
+                    spvRow?.spv_detail_verification_status === "rejected" ||
+                    Boolean(spvRow?.rejection_reason);
+                  if (!hasRejection) return null;
+                  return (
+                    <div className="col-span-full p-3.5 rounded-xl bg-red-50 border border-red-300 text-red-900 text-xs space-y-1.5 my-1">
+                      <div className="font-bold flex items-center gap-1.5 text-red-950">
+                        <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                        <span>SPV Details Status: Rejected</span>
+                      </div>
+                      {spvRow?.rejection_reason && (
+                        <div className="pt-1.5 border-t border-red-200/80">
+                          <span className="font-extrabold uppercase text-[10px] text-red-800 block mb-0.5">
+                            Auditor Rejection Note:
+                          </span>
+                          <p className="font-medium text-red-950 bg-red-100/70 p-2.5 rounded-lg border border-red-200/60 whitespace-pre-wrap">
+                            {spvRow.rejection_reason}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 <div>
                   <dt className="text-gray-500">SPV Legal Name</dt>
                   <dd className="font-medium text-gray-900">
@@ -337,9 +403,12 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
             </div>
             {projectData?.sharia_contract_type !== "spv_equity" && (
               <div>
-                <dt className="text-gray-500">Expected ROI</dt>
+                <dt className="text-gray-500">{getRoiLabelForContract(projectData?.sharia_contract_type)}</dt>
                 <dd className="font-medium text-gray-900">
                   {projectData?.expected_roi_percent || "—"}%
+                  {projectData?.sharia_contract_type === "mudarabah" && (
+                    <span className="ml-1 text-xs text-gray-500 font-normal">(Target, not guaranteed)</span>
+                  )}
                 </dd>
               </div>
             )}
@@ -349,7 +418,150 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
                 {projectData?.yield_type?.replace("_", " ") || "—"}
               </dd>
             </div>
+            {projectData?.sharia_contract_type !== "spv_equity" && (
+              <div>
+                <dt className="text-gray-500">Tenor / Investment Term</dt>
+                <dd className="font-medium text-gray-900">
+                  {projectData?.tenor_months ? `${projectData.tenor_months} months` : "—"}
+                </dd>
+              </div>
+            )}
           </dl>
+
+          {/* Sub-box for Contract Repayment Terms */}
+          <div className="mt-6 pt-4 border-t border-gray-100">
+            <h5 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
+              {projectData?.sharia_contract_type === "spv_equity" ? "Equity Structure & Exit Terms" : "Repayment Terms"}
+            </h5>
+            {projectData?.sharia_contract_type === "murabaha" && (
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                <div>
+                  <dt className="text-gray-500">Payment Frequency</dt>
+                  <dd className="font-medium text-gray-900 capitalize">
+                    {contractTerms?.payment_frequency ? contractTerms.payment_frequency.replace("_", " ") : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Principal Repayment</dt>
+                  <dd className="font-medium text-gray-900">
+                    {contractTerms?.principal_repayment === "with_instalments"
+                      ? "With instalments"
+                      : contractTerms?.principal_repayment === "at_maturity"
+                        ? "At maturity"
+                        : "—"}
+                  </dd>
+                </div>
+                {contractTerms?.asset_description && (
+                  <div className="sm:col-span-2">
+                    <dt className="text-gray-500 mb-1">Asset Description</dt>
+                    <dd className="font-medium text-gray-900 bg-gray-50 p-3 rounded-lg border border-gray-200 text-xs whitespace-pre-wrap">
+                      {contractTerms.asset_description}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            )}
+            {projectData?.sharia_contract_type === "ijara" && (
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                <div>
+                  <dt className="text-gray-500">Rental Payment Frequency</dt>
+                  <dd className="font-medium text-gray-900 capitalize">
+                    {contractTerms?.payment_frequency ? contractTerms.payment_frequency.replace("_", " ") : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Asset Value</dt>
+                  <dd className="font-medium text-gray-900">
+                    {contractTerms?.asset_value != null
+                      ? `${projectData?.currency || ""} ${Number(contractTerms.asset_value).toLocaleString()}`
+                      : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">End of Term Outcome</dt>
+                  <dd className="font-medium text-gray-900">
+                    {contractTerms?.end_of_term === "sale_to_issuer"
+                      ? "Sale to issuer"
+                      : contractTerms?.end_of_term === "sale_to_third_party"
+                        ? "Sale to third party"
+                        : contractTerms?.end_of_term === "return_asset"
+                          ? "Return asset"
+                          : "—"}
+                  </dd>
+                </div>
+                {contractTerms?.end_of_term === "sale_to_issuer" && contractTerms?.end_of_term_price != null && (
+                  <div>
+                    <dt className="text-gray-500">End of Term Price</dt>
+                    <dd className="font-medium text-gray-900">
+                      {projectData?.currency || ""} {Number(contractTerms.end_of_term_price).toLocaleString()}
+                    </dd>
+                  </div>
+                )}
+                {contractTerms?.asset_description && (
+                  <div className="sm:col-span-2">
+                    <dt className="text-gray-500 mb-1">Asset Description</dt>
+                    <dd className="font-medium text-gray-900 bg-gray-50 p-3 rounded-lg border border-gray-200 text-xs whitespace-pre-wrap">
+                      {contractTerms.asset_description}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            )}
+            {projectData?.sharia_contract_type === "mudarabah" && (
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                <div>
+                  <dt className="text-gray-500">Investor Profit Share</dt>
+                  <dd className="font-medium text-gray-900">
+                    {contractTerms?.investor_profit_share_percent != null
+                      ? `${contractTerms.investor_profit_share_percent}%`
+                      : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Profit Reporting Frequency</dt>
+                  <dd className="font-medium text-gray-900 capitalize">
+                    {contractTerms?.profit_reporting_frequency
+                      ? contractTerms.profit_reporting_frequency.replace("_", " ")
+                      : "—"}
+                  </dd>
+                </div>
+              </dl>
+            )}
+            {projectData?.sharia_contract_type === "spv_equity" && (
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                <div>
+                  <dt className="text-gray-500">Existing Shares Outstanding</dt>
+                  <dd className="font-medium text-gray-900">
+                    {contractTerms?.existing_shares_outstanding != null
+                      ? Number(contractTerms.existing_shares_outstanding).toLocaleString()
+                      : "0"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Voting Rights</dt>
+                  <dd className="font-medium text-gray-900">
+                    {contractTerms?.voting_rights ? "Voting shares included" : "Non-voting shares"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Dividend Policy</dt>
+                  <dd className="font-medium text-gray-900 capitalize">
+                    {contractTerms?.dividend_policy
+                      ? contractTerms.dividend_policy.replace("_", " ")
+                      : "None planned"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Target Exit Horizon</dt>
+                  <dd className="font-medium text-gray-900">
+                    {contractTerms?.target_exit_horizon_years
+                      ? `${contractTerms.target_exit_horizon_years} years`
+                      : "Not specified"}
+                  </dd>
+                </div>
+              </dl>
+            )}
+          </div>
         </div>
 
         {/* Section 4: Documents */}
@@ -442,7 +654,8 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
         <button
           type="button"
           onClick={onPrev}
-          className="py-2 px-6 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+          disabled={submitting}
+          className="py-2 px-6 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
         >
           Back
         </button>
@@ -450,11 +663,68 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
           type="button"
           onClick={handleSubmit}
           disabled={submitting || disabled || hasActiveUploads}
-          className="flex items-center py-2 px-8 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#064e3b] hover:bg-[#064e3b]/90 disabled:opacity-50"
+          className="flex items-center py-2 px-8 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#064e3b] hover:bg-[#064e3b]/90 disabled:opacity-50 cursor-pointer"
         >
           {submitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Submitting...</> : "Submit for Review"}
         </button>
       </div>
+
+      {/* Submission Loader Overlay */}
+      {submitting && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex flex-col items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 shadow-2xl flex flex-col items-center max-w-sm text-center border border-gray-100">
+            <Loader2 className="w-10 h-10 text-[#064e3b] animate-spin mb-3" />
+            <h4 className="text-base font-bold text-gray-900">Submitting Project</h4>
+            <p className="text-xs text-gray-500 mt-1">
+              Please wait while your project details and documentation are submitted for review...
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Success Modal */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 space-y-6 shadow-2xl border border-gray-100 text-center">
+            <div className="mx-auto w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center border-4 border-emerald-100">
+              <CheckCircle2 className="w-9 h-9 text-[#064e3b]" />
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold text-gray-900">
+                Project Submitted Successfully!
+              </h3>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                Your project <strong className="text-gray-800">&ldquo;{projectData?.title}&rdquo;</strong> has been successfully submitted for review.
+              </p>
+            </div>
+
+            <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl text-left text-xs text-emerald-950 space-y-1.5">
+              <p className="font-semibold text-emerald-900">What happens next?</p>
+              <p className="text-emerald-800 leading-normal">
+                Our compliance and audit team will review your project details, financial structure, and documentation. You will be notified when the review is complete.
+              </p>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (onSuccess) {
+                    onSuccess();
+                  } else {
+                    router.push("/issuer-portal/projects");
+                  }
+                }}
+                className="w-full inline-flex items-center justify-center gap-2 py-3 px-6 rounded-xl text-sm font-semibold text-white bg-[#064e3b] hover:bg-[#064e3b]/90 shadow-md transition-all cursor-pointer"
+              >
+                <span>Back to My Projects</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

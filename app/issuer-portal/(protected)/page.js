@@ -78,7 +78,7 @@ export default async function IssuerPortalDashboard() {
       );
 
       lifetimeCapitalRaised = validLifetimePledges.reduce(
-        (sum, p) => sum + Number(p.allocated_amount || p.pledged_amount || 0),
+        (sum, p) => sum + Number(p.allocated_amount ?? p.pledged_amount ?? 0),
         0,
       );
 
@@ -104,8 +104,13 @@ export default async function IssuerPortalDashboard() {
         return "bg-amber-100 text-amber-800 border-amber-300";
       case "campaign_live":
         return "bg-emerald-600 text-white border-emerald-700 shadow-xs";
+      case "closing":
+        return "bg-amber-500 text-white border-amber-600 shadow-xs";
       case "funded":
         return "bg-teal-600 text-white border-teal-700 shadow-xs";
+      case "failed":
+        return "bg-rose-600 text-white border-rose-700 shadow-xs";
+      case "completed":
       case "closed":
         return "bg-slate-700 text-white border-slate-800";
       default:
@@ -292,11 +297,25 @@ export default async function IssuerPortalDashboard() {
 
               const targetGoal = Number(project.target_goal) || 0;
               const liveRaised = Number(project.live_raised_amount) || 0;
-              const percent =
-                targetGoal > 0
-                  ? Math.min((liveRaised / targetGoal) * 100, 100).toFixed(1)
-                  : 0;
+              const isFunded = status === "funded";
+              const isFailed = status === "failed";
+              const isClosing = status === "closing";
+              const isLive = status === "campaign_live";
+              const allocatedTotal =
+                project.allocated_total != null
+                  ? Number(project.allocated_total)
+                  : liveRaised;
+              const subscribedAtClose =
+                project.subscribed_total_at_close != null
+                  ? Number(project.subscribed_total_at_close)
+                  : liveRaised;
+              const displayRaised = isFunded ? allocatedTotal : liveRaised;
+              const rawPercent =
+                targetGoal > 0 ? (displayRaised / targetGoal) * 100 : 0;
+              // Remove clamp from displayed percentage so it can read 130%. Cap only visual bar at 100%.
+              const percent = rawPercent.toFixed(1);
               const currency = project.currency || "USD";
+              const isOversubscribed = isLive && rawPercent > 100;
 
               return (
                 <div
@@ -304,7 +323,7 @@ export default async function IssuerPortalDashboard() {
                   className="bg-[#fcfaf7] rounded-2xl p-5 border border-gray-200/80 flex flex-col justify-between space-y-4 hover:border-emerald-300 hover:shadow-md transition-all"
                 >
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span
                         className={`px-2.5 py-0.5 text-[10px] font-extrabold rounded-full border uppercase tracking-wider ${getStatusBadgeStyle(
                           status,
@@ -312,6 +331,11 @@ export default async function IssuerPortalDashboard() {
                       >
                         {status.replace("_", " ")}
                       </span>
+                      {isOversubscribed && (
+                        <span className="px-2 py-0.5 text-[10px] font-black rounded-full bg-purple-100 text-purple-800 border border-purple-200 uppercase tracking-wider">
+                          Oversubscribed
+                        </span>
+                      )}
                     </div>
 
                     <h3 className="font-bold text-base text-[#064e3b] line-clamp-1">
@@ -326,7 +350,15 @@ export default async function IssuerPortalDashboard() {
                   <div className="space-y-2 bg-white p-3.5 rounded-xl border border-gray-200/60">
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-semibold text-gray-500">
-                        Funding Progress
+                        {isFunded
+                          ? "Funded"
+                          : isFailed
+                            ? "Campaign Failed"
+                            : isClosing
+                              ? "Allocation in Progress"
+                              : isLive
+                                ? "Subscription Progress"
+                                : "Funding Progress"}
                       </span>
                       <span className="font-extrabold text-[#064e3b]">
                         {percent}%
@@ -335,20 +367,45 @@ export default async function IssuerPortalDashboard() {
 
                     <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
                       <div
-                        className="bg-gradient-to-r from-[#059669] to-[#047857] h-full rounded-full transition-all duration-500"
-                        style={{ width: `${percent}%` }}
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          isFailed
+                            ? "bg-rose-500"
+                            : "bg-gradient-to-r from-[#059669] to-[#047857]"
+                        }`}
+                        style={{ width: `${Math.min(rawPercent, 100)}%` }}
                       />
                     </div>
 
                     <div className="flex justify-between text-[11px] font-semibold text-gray-700 pt-0.5">
                       <span>
-                        Raised: {currency} {liveRaised.toLocaleString()}
+                        {isFunded
+                          ? "Funded"
+                          : isLive
+                            ? "Subscribed"
+                            : "Raised"}
+                        : {currency} {displayRaised.toLocaleString()}
                       </span>
                       <span>
                         Goal: {currency}{" "}
                         {targetGoal > 0 ? targetGoal.toLocaleString() : "TBD"}
                       </span>
                     </div>
+
+                    {(isFunded || isFailed) && (
+                      <div className="pt-1.5 border-t border-gray-100 text-[11px] text-gray-500 flex items-center justify-between">
+                        <span>
+                          Subscribed at close: {currency}{" "}
+                          {subscribedAtClose.toLocaleString()}
+                        </span>
+                        {isFailed && project.failure_reason && (
+                          <span className="text-rose-700 font-bold">
+                            {project.failure_reason === "no_pledges"
+                              ? "No pledges"
+                              : "Soft cap not met"}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Management Action Button */}

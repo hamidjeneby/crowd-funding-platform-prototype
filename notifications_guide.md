@@ -12,10 +12,10 @@ Stores individual notification messages sent to specific investors.
 | Field | Type | Description |
 | :--- | :--- | :--- |
 | `id` | UUID / PK | Unique notification record identifier |
-| `investor_id` | UUID (FK -> `investors.id`) | Recipient investor ID |
-| `project_id` | UUID (FK -> `projects.id`) | Associated project ID |
-| `type` | TEXT | Category (`campaign_alert`, `funding_threshold`, `conversion_pool`, `milestone`) |
-| `notification_text` | TEXT | Specific code identifier (e.g. `30_days_to_deadline`, `50_percent_funded`, `system_milestone`) |
+| `investor_id` | UUID / BIGINT (FK -> `investors.id`) | Recipient investor ID |
+| `project_id` | UUID / BIGINT / NULL (FK -> `projects.id`) | Associated project ID (Nullable; `NULL` for account-level notifications such as onboarding and bank verification) |
+| `type` | TEXT | Category (`campaign_alert`, `funding_threshold`, `conversion_pool`, `milestone`, `onboarding`, `banking`) |
+| `notification_text` | TEXT | Specific code identifier (e.g. `30_days_to_deadline`, `50_percent_funded`, `system_milestone`, `onboarding_approved`, `onboarding_sent_back`, `onboarding_rejected`, `bank_verified`, `bank_rejected`) |
 | `title` | TEXT | User-facing title |
 | `message` | TEXT | Concise notification message text |
 | `read_status` | BOOLEAN / TEXT | Read state (`FALSE` when created, updated to `TRUE` when dismissed) |
@@ -89,16 +89,54 @@ If any matching rows exist, insertion is skipped to prevent duplicate alerts.
 
 ---
 
-## 5. Milestone Notifications Specification (Future Implementation)
+## 5. Milestone Notifications Engine & Architecture
 
-When milestone notification logic is implemented:
+### 5.1 Auditor vs. Issuer Responsibilities
 
-- **Trigger**: Fired when the `status` field of a record in `project_milestones` changes to `completed`.
-- **Notification Type**: `milestone`
-- **Notification Text**:
-  - `system_milestone` when `milestone_source = 'system'`
-  - `issuer_milestone` when `milestone_source = 'issuer'`
-- **Target Audience**: All investors subscribed to `project_notification_subscriptions` with `notify_milestones = TRUE` for that `project_id`.
+1. **Auditor Milestone Review (Compliance Phase)**:
+   - When an issuer submits milestones during project creation or adds new milestones, the auditor reviews them in `/auditor-portal/milestone-review` or `/auditor-portal/project-creation/[id]`.
+   - The auditor's decision only updates `verification_status` to `"approved"` or `"rejected"`.
+   - **Crucial Rule**: The auditor does **NOT** mark the milestone as completed. The milestone remains `upcoming` / `pending` until it is actually executed in real life. Therefore, **no milestone completion notifications are sent during auditor review**.
+
+2. **Issuer Milestone Execution (Operational Phase)**:
+   - Once a campaign is live and the auditor has verified the milestone definition, the issuer fulfills the work.
+   - When deliverables are ready, **only the issuer** can mark the milestone as reached via the Issuer Project Management page (`/issuer-portal/projects/[slug]/manage` -> Roadmap tab).
+   - This calls `markMilestoneReached(projectId, milestoneId)`, which updates `status = 'completed'` and immediately executes `notifyInvestorsOnMilestoneCompleted`.
+
+---
+
+### 5.2 Application-Level Notification Execution Flow
+
+When an issuer marks an approved milestone as reached:
+
+1. **Step 1: Project Presence Check**:
+   The engine queries `project_notification_subscriptions` where `project_id = target_project_id` to confirm that at least one investor has subscribed to notifications for this campaign. If count is 0, execution halts cleanly.
+
+2. **Step 2: Milestone Subscriber Filtering**:
+   Queries all subscription records for that `project_id` where `notify_milestones = TRUE`.
+
+3. **Step 3: Milestone & Project Data Resolution**:
+   Fetches milestone details (`title`, `description`, `milestone_source`) and project title.
+   - **Notification Type**: `milestone`
+   - **Notification Text**: `issuer_milestone` (for issuer deliverables) or `system_milestone` (for platform milestones).
+   - **Notification Title**: Milestone title formatted (e.g. `"Site Inspection Reached"`).
+   - **Notification Message**: Clear achievement statement: `"{milestone_title} has been reached."` (does not use raw milestone description text).
+
+4. **Step 4: Deduplication Filter**:
+   Queries the `notifications` table for existing records matching `(investor_id, project_id, type = 'milestone', title)`. Any investor who has already received this milestone notification is excluded to prevent repeated or duplicate notifications.
+
+5. **Step 5: Batch Record Insertion**:
+   Inserts new notification rows with `read_status = 'false'`, immediately making them visible in the investor's top-right toast deck and notifications center.
+
+---
+
+### 5.4 Trigger Points in Platform Workstations
+
+| Workflow Stage | Location | Action | Notification Dispatched? |
+| :--- | :--- | :--- | :--- |
+| **Auditor Review** | `/auditor-portal/milestone-review` | Auditor approves milestone (`verification_status = 'approved'`) | ❌ No (Milestone is verified, not yet completed) |
+| **Issuer Execution** | `/issuer-portal/projects/[slug]/manage` | Issuer marks milestone as reached (`status = 'completed'`) | ✅ Yes (Fires `notifyInvestorsOnMilestoneCompleted`) |
+
 
 ---
 
@@ -114,4 +152,116 @@ When milestone notification logic is implemented:
 
 ### 6.2 Notifications Center (`/investor-portal/notifications`)
 - Full-page database-driven feed reading directly from the `notifications` table.
-- Filterable tabs for All Events, Campaign Alerts, Funding Thresholds, Conversion Pool Alerts, and Milestones.
+- Filterable tabs for All Notifications, Onboarding Updates, Bank Verification, Campaign Alerts, Funding Thresholds, Conversion Pool Alerts, and Milestones.
+
+---
+
+## 7. Investor Onboarding & Bank Verification Notifications (Auditor Portal)
+
+### 7.1 Overview
+Unlike campaign, milestone, or funding threshold alerts, onboarding review and bank verification notifications are **account-level events**.
+- **No Project ID**: `project_id` is explicitly set to `NULL` (since these events pertain to investor identity & banking accounts, not a specific project).
+- **Target Recipient**: Dispatched directly to the specific investor (`investor_id`).
+- **Actionable & Concise**: Each notification clearly informs the investor of the decision and provides direct, concise next steps.
+
+---
+
+### 7.2 Onboarding Review Scenarios (3 Outcomes)
+Triggered when an auditor reviews and finalizes the investor's onboarding submission from the Auditor Portal (`/auditor-portal/investor-onboarding/[id]` via `submitInvestorFinalOnboardingDecision` or `/auditor-portal/case/investor/[id]` via `submitAuditorDecision`).
+
+#### Scenario 1: Approved (`decision = 'approve'` or `'approved'`)
+- **Status**: Investor onboarding is verified and approved.
+- **Investor Next Step**: Can now explore live campaigns and start investing.
+- **Table Record**:
+  ```json
+  {
+    "investor_id": 30,
+    "project_id": null,
+    "type": "onboarding",
+    "notification_text": "onboarding_approved",
+    "title": "Onboarding Approved",
+    "message": "Your investor onboarding has been approved. You can now explore live campaigns and start investing.",
+    "read_status": false
+  }
+  ```
+
+#### Scenario 2: Sent Back (`decision = 'send_back'` or `'sent_back'`)
+- **Status**: Investor submission requires adjustments or missing information.
+- **Investor Next Step**: Review auditor feedback, update profile/documents, and resubmit for review.
+- **Table Record**:
+  ```json
+  {
+    "investor_id": 30,
+    "project_id": null,
+    "type": "onboarding",
+    "notification_text": "onboarding_sent_back",
+    "title": "Onboarding Action Required",
+    "message": "Your application was sent back for updates. Please review the feedback, update your details, and resubmit.",
+    "read_status": false
+  }
+  ```
+
+#### Scenario 3: Rejected (`decision = 'reject'` or `'rejected'`)
+- **Status**: Investor onboarding application has been declined.
+- **Investor Next Step**: Contact platform support for assistance or appeal guidance.
+- **Table Record**:
+  ```json
+  {
+    "investor_id": 30,
+    "project_id": null,
+    "type": "onboarding",
+    "notification_text": "onboarding_rejected",
+    "title": "Onboarding Rejected",
+    "message": "Your investor onboarding application has been rejected. Please contact support for assistance.",
+    "read_status": false
+  }
+  ```
+
+---
+
+### 7.3 Bank Details Verification Scenarios (2 Outcomes)
+Triggered when an auditor reviews the investor's bank details and bank letter from the Auditor Portal (`/auditor-portal/investor-onboarding/[id]` via `updateInvestorBankDecision` or `/auditor-portal/bank-review` via `updateBankVerificationDecision`).
+
+#### Scenario 4: Approved (`decision = 'approved'` or `'approve'`)
+- **Status**: Bank account details and verification proof have been validated.
+- **Investor Next Step**: Wallet withdrawals and payout distributions are now active and accessible.
+- **Table Record**:
+  ```json
+  {
+    "investor_id": 30,
+    "project_id": null,
+    "type": "banking",
+    "notification_text": "bank_verified",
+    "title": "Bank Details Verified",
+    "message": "Your bank account has been verified. Wallet withdrawals and payout distributions are now active.",
+    "read_status": false
+  }
+  ```
+
+#### Scenario 5: Rejected (`decision = 'rejected'` or `'reject'`)
+- **Status**: Bank account details could not be validated.
+- **Investor Next Step**: Update banking details in settings with valid proof documents.
+- **Table Record**:
+  ```json
+  {
+    "investor_id": 30,
+    "project_id": null,
+    "type": "banking",
+    "notification_text": "bank_rejected",
+    "title": "Bank Verification Rejected",
+    "message": "Your submitted bank details could not be verified. Please update your banking information in settings with valid proof.",
+    "read_status": false
+  }
+  ```
+
+---
+
+### 7.4 Trigger Points in Platform Workstations
+
+| Workflow Event | Portal Location | Server Action | Notification Dispatched |
+| :--- | :--- | :--- | :--- |
+| **Onboarding Final Decision** | `/auditor-portal/investor-onboarding/[id]` | `submitInvestorFinalOnboardingDecision` | `notifyInvestorOnboardingDecision(investorId, decision, reviewNotes)` |
+| **Case Review Decision** | `/auditor-portal/case/investor/[id]` | `submitAuditorDecision` (type: `"investor"`) | `notifyInvestorOnboardingDecision(numId, decision, rejectionReason)` |
+| **Onboarding Bank Review** | `/auditor-portal/investor-onboarding/[id]` | `updateInvestorBankDecision` | `notifyInvestorBankVerificationDecision(investorId, decision)` |
+| **Dedicated Bank Queue** | `/auditor-portal/bank-review` | `updateBankVerificationDecision` (entityType: `"investor"`) | `notifyInvestorBankVerificationDecision(numId, decision, rejectionReason)` |
+

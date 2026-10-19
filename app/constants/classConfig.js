@@ -7,6 +7,8 @@ export const CLASS_CONFIG = {
   6: { maxPledge: 200000, canSeePendingReview: false, minTargetGoal: 10000000, maxActivePledges: Infinity, feePercent: 1.0, conversionCap: 0, name: "Class 6 (Mid-Tier)" },
   7: { maxPledge: 50000, canSeePendingReview: false, minTargetGoal: 15000000, maxActivePledges: Infinity, feePercent: 1.2, conversionCap: 0, name: "Class 7 (Emerging)" },
   8: { maxPledge: 10000, canSeePendingReview: false, minTargetGoal: 20000000, maxActivePledges: Infinity, feePercent: 1.5, conversionCap: 0, name: "Class 8 (Emerging)" },
-  9: { maxPledge: 2000, canSeePendingReview: false, minTargetGoal: 0, maxActivePledges: Infinity, feePercent: 2.0, conversionCap: 0, name: "Class 9 (Retail)" },
-  10: { maxPledge: 500, canSeePendingReview: false, minTargetGoal: 0, maxActivePledges: 1, feePercent: 2.5, conversionCap: 0, name: "Class 10 (Retail General)" },
+  9: { maxPledge: 2000, canSeePendingReview: false, minTargetGoal: 20000000, maxActivePledges: Infinity, feePercent: 2.0, conversionCap: 0, name: "Class 9 (Retail)" },
+  10: { maxPledge: 500, canSeePendingReview: false, minTargetGoal: 20000000, maxActivePledges: 1, feePercent: 2.5, conversionCap: 0, name: "Class 10 (Retail General)" },
 };
+
+export const MAX_OVERSUBSCRIPTION_PERCENT = 150;

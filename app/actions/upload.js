@@ -107,7 +107,7 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
   const { userId, issuerId } = await verifyProjectAccess(projectId);
   const results = { documents: 0, media: 0, cover: false };
 
-  const SENSITIVE_BUCKETS = ["investor_docs", "investor_reps", "project_docs", "issuer_reps", "issuer_docs"];
+  const SENSITIVE_BUCKETS = ["investor_docs", "investor_reps", "project_docs", "issuer_reps", "issuer_docs", "project_media"];
 
   for (const file of uploadedFiles) {
     let { data: { publicUrl } } = supabaseAdmin.storage
@@ -121,16 +121,20 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
     if (file.category === "document") {
       if (file.type === "other") {
         // Always insert for 'other'
-        await supabaseAdmin.from("project_docs").insert({
+        const { error: insErr } = await supabaseAdmin.from("project_docs").insert({
           project_id: projectId,
           issuer_id: issuerId,
           doc_type: "other",
           file_url: publicUrl,
           review_status: "pending",
-          rejection_reason: null,
           uploaded_by: userId,
           uploaded_at: new Date().toISOString(),
         });
+
+        if (insErr) {
+          console.error("Failed to insert other document record:", insErr);
+          throw new Error("Failed to record document upload in database.");
+        }
       } else {
         // Prevent replacing approved documents
         const { data: existingDoc } = await supabaseAdmin
@@ -147,38 +151,51 @@ export async function recordSuccessfulUploads(projectId, uploadedFiles) {
         // Delete old slot if it exists, then insert to avoid unique constraint errors on upsert
         await supabaseAdmin.from("project_docs").delete().match({ project_id: projectId, doc_type: file.type });
         
-        await supabaseAdmin.from("project_docs").insert({
+        const { error: insErr } = await supabaseAdmin.from("project_docs").insert({
           project_id: projectId,
           issuer_id: issuerId,
           doc_type: file.type,
           file_url: publicUrl,
           review_status: "pending",
-          rejection_reason: null,
           uploaded_by: userId,
           uploaded_at: new Date().toISOString(),
         });
+
+        if (insErr) {
+          console.error(`Failed to insert document record (${file.type}):`, insErr);
+          throw new Error("Failed to record document upload in database.");
+        }
       }
       results.documents++;
     } else if (file.category === "media") {
       if (file.isCover) {
         // Update cover_image_url and reset cover_image_review_status to pending in projects table
-        await supabaseAdmin.from("projects").update({
+        const { error: covErr } = await supabaseAdmin.from("projects").update({
           cover_image_url: publicUrl,
           cover_image_review_status: "pending",
         }).eq("id", projectId);
+
+        if (covErr) {
+          console.error("Failed to update project cover image:", covErr);
+          throw new Error("Failed to record cover image upload in database.");
+        }
         results.cover = true;
       } else {
         // Insert into project_media
         const orderVal = file.display_order !== undefined && file.display_order !== null && Number(file.display_order) > 0 ? Number(file.display_order) : 1;
-        await supabaseAdmin.from("project_media").insert({
+        const { error: medErr } = await supabaseAdmin.from("project_media").insert({
           project_id: projectId,
           issuer_id: issuerId,
           media_type: file.type,
           url: publicUrl,
           display_order: orderVal,
           review_status: "pending",
-          rejection_reason: null,
         });
+
+        if (medErr) {
+          console.error("Failed to insert media record:", medErr);
+          throw new Error("Failed to record media upload in database.");
+        }
         results.media++;
       }
     }
@@ -275,6 +292,7 @@ export async function getSignedUrlsForMedia(urls) {
   for (const url of urls) {
     let bucket = "project_media";
     if (url.includes("/cover_images/")) bucket = "cover_images";
+    else if (url.includes("/cover_img/")) bucket = "cover_img";
     else if (url.includes("/project_docs/")) bucket = "project_docs";
     
     const urlParts = url.split(`/${bucket}/`);

@@ -12,8 +12,11 @@ import {
   ChevronUp,
   MessageSquare,
   CheckCircle2,
-  FileText
+  FileText,
+  AlertCircle,
+  Loader2,
 } from "lucide-react";
+import { createSupportTicket } from "@/app/actions/tickets";
 
 export default function SupportHelpPage() {
   // FAQ Accordion State
@@ -27,6 +30,7 @@ export default function SupportHelpPage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [ticketSuccessMsg, setTicketSuccessMsg] = useState("");
+  const [ticketError, setTicketError] = useState("");
 
   const faqs = [
     {
@@ -55,19 +59,37 @@ export default function SupportHelpPage() {
     },
   ];
 
-  const handleTicketSubmit = (e) => {
+  const handleTicketSubmit = async (e) => {
     e.preventDefault();
     if (!ticketForm.subject.trim() || !ticketForm.message.trim()) return;
 
     setIsSubmitting(true);
-    setTimeout(() => {
+    setTicketError("");
+    setTicketSuccessMsg("");
+
+    try {
+      const res = await createSupportTicket({
+        category: ticketForm.category,
+        subject: ticketForm.subject,
+        message: ticketForm.message,
+        userType: "investor",
+      });
+
+      if (res.success) {
+        setTicketSuccessMsg(
+          `Investor support ticket #${res.ticket.id} submitted successfully! Our compliance desk will review and respond shortly.`
+        );
+        setTicketForm({ subject: "", category: "general", message: "" });
+        setTimeout(() => setTicketSuccessMsg(""), 8000);
+      } else {
+        setTicketError(res.error || "Failed to submit ticket. Please try again.");
+      }
+    } catch (err) {
+      console.error("Error submitting investor ticket:", err);
+      setTicketError("An unexpected error occurred while submitting your ticket.");
+    } finally {
       setIsSubmitting(false);
-      setTicketSuccessMsg(
-        `Support ticket #${Math.floor(100000 + Math.random() * 900000)} submitted successfully! Our compliance team will respond within 24 hours.`
-      );
-      setTicketForm({ subject: "", category: "general", message: "" });
-      setTimeout(() => setTicketSuccessMsg(""), 6000);
-    }, 800);
+    }
   };
 
   return (
@@ -143,6 +165,13 @@ export default function SupportHelpPage() {
             </div>
           )}
 
+          {ticketError && (
+            <div className="p-4 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-semibold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+              <span>{ticketError}</span>
+            </div>
+          )}
+
           <form onSubmit={handleTicketSubmit} className="space-y-4 text-xs">
             <div>
               <label className="block font-bold text-[#064e3b] uppercase mb-1">
@@ -158,6 +187,7 @@ export default function SupportHelpPage() {
                 <option value="banking">Bank Account Verification</option>
                 <option value="classification">Investor Class Upgrade</option>
                 <option value="milestones">Project Milestone Query</option>
+                <option value="other">Other</option>
               </select>
             </div>
 
@@ -194,7 +224,15 @@ export default function SupportHelpPage() {
               disabled={isSubmitting}
               className="w-full py-3 rounded-xl bg-[#064e3b] text-white font-bold hover:bg-[#047857] transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              <Send className="w-4 h-4" /> Submit Ticket
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Submitting Ticket...
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4" /> Submit Ticket
+                </>
+              )}
             </button>
           </form>
         </div>

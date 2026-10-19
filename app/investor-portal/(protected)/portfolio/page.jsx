@@ -58,20 +58,36 @@ export default async function PortfolioPage() {
   // Active holdings present - map dbHoldings (pledge rows with status = allocated/active/completed) to view format
   const holdings = dbHoldings.map((h, idx) => {
     const proj = h.projects || {};
-    const amount = Number(h.allocated_amount || h.pledged_amount || 0);
+    const amount = Number(h.allocated_amount ?? h.pledged_amount ?? 0);
+    const isPartial =
+      h.allocated_amount != null &&
+      h.pledged_amount != null &&
+      Number(h.allocated_amount) < Number(h.pledged_amount);
     const investorClassAtPledge = h.investor_class_at_pledge || investorClass || "?";
     const feePercentAtPledge = h.fee_percent_at_pledge != null ? h.fee_percent_at_pledge : 0;
     return {
       id: h.id,
       project: proj.title || "Unnamed Project",
+      slug: proj.slug,
       category: proj.sharia_contract_type ? proj.sharia_contract_type.replace("_", " ").toUpperCase() : "Investment",
       amountInvested: amount,
+      refundedAmount: Number(h.refunded_amount || 0),
+      allocatedUnits: h.allocated_units ?? h.pledged_units ?? null,
+      unitType: proj.unit_type || "units",
+      ownershipPercentage: h.ownership_percentage,
+      conversionEligibleUnits: h.conversion_eligible_units,
       investorClassAtPledge,
       feePercentAtPledge,
       allocation: 0, // Computed below
-      targetReturn: proj.expected_roi_percent ? `${proj.expected_roi_percent}% ROI` : "Equity",
+      targetReturn:
+        h.ownership_percentage != null
+          ? `${Number(Number(h.ownership_percentage).toFixed(4))}% Equity`
+          : proj.expected_roi_percent
+            ? `${proj.expected_roi_percent}% ROI`
+            : "Equity",
       nextPayout: h.allocated_at ? new Date(h.allocated_at).toLocaleDateString() : h.pledged_at ? new Date(h.pledged_at).toLocaleDateString() : "Pending",
-      status: h.status ? h.status.toUpperCase() : "ALLOCATED",
+      status: isPartial ? "Partially allocated" : "Allocated",
+      isPartial,
       color: idx % 3 === 0 ? "#059669" : idx % 3 === 1 ? "#10b981" : "#34d399",
       currency: proj.currency || "USD",
     };
@@ -184,7 +200,8 @@ export default async function PortfolioPage() {
                 <th className="py-3 px-4">Contract</th>
                 <th className="py-3 px-4">Pledge Class & Fee</th>
                 <th className="py-3 px-4">Amount Deployed</th>
-                <th className="py-3 px-4">Target Return</th>
+                <th className="py-3 px-4">Units</th>
+                <th className="py-3 px-4">Target Return / Stake</th>
                 <th className="py-3 px-4">Issued Date</th>
                 <th className="py-3 px-4 rounded-r-xl text-right">Status</th>
               </tr>
@@ -192,16 +209,40 @@ export default async function PortfolioPage() {
             <tbody className="divide-y divide-gray-100 font-medium">
               {holdings.map((h) => (
                 <tr key={h.id} className="hover:bg-emerald-50/50 transition-colors">
-                  <td className="py-3.5 px-4 font-bold text-[#064e3b]">{h.project}</td>
+                  <td className="py-3.5 px-4 font-bold text-[#064e3b]">
+                    {h.slug ? (
+                      <Link href={`/investor-portal/projects/${h.slug}`} className="hover:underline">
+                        {h.project}
+                      </Link>
+                    ) : (
+                      h.project
+                    )}
+                  </td>
                   <td className="py-3.5 px-4 text-gray-600">{h.category}</td>
                   <td className="py-3.5 px-4 font-semibold text-emerald-800">
                     Class {h.investorClassAtPledge} ({h.feePercentAtPledge}%)
                   </td>
-                  <td className="py-3.5 px-4 font-bold text-[#064e3b]">{h.currency} {h.amountInvested.toLocaleString()}</td>
+                  <td className="py-3.5 px-4 font-bold text-[#064e3b]">
+                    <div>{h.currency} {h.amountInvested.toLocaleString()}</div>
+                    {h.refundedAmount > 0 && (
+                      <div className="text-[10px] text-teal-800 font-medium">
+                        Refunded: {h.currency} {h.refundedAmount.toLocaleString()}
+                      </div>
+                    )}
+                  </td>
+                  <td className="py-3.5 px-4 font-semibold text-gray-700">
+                    {h.allocatedUnits != null ? `${Number(h.allocatedUnits).toLocaleString()} ${h.unitType}` : "—"}
+                  </td>
                   <td className="py-3.5 px-4 text-emerald-700 font-bold">{h.targetReturn}</td>
                   <td className="py-3.5 px-4 text-gray-600">{h.nextPayout}</td>
                   <td className="py-3.5 px-4 text-right">
-                    <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
+                    <span
+                      className={`px-2.5 py-1 rounded-full font-bold text-[10px] ${
+                        h.isPartial
+                          ? "bg-teal-100 text-teal-900"
+                          : "bg-emerald-100 text-emerald-800"
+                      }`}
+                    >
                       {h.status}
                     </span>
                   </td>

@@ -106,7 +106,7 @@ export async function POST(request) {
     }
 
     // Get public/authenticated URL
-    const SENSITIVE_BUCKETS = ["investor_docs", "investor_reps", "project_docs", "issuer_reps", "issuer_docs"];
+    const SENSITIVE_BUCKETS = ["investor_docs", "investor_reps", "project_docs", "issuer_reps", "issuer_docs", "project_media"];
     const {
       data: { publicUrl: rawUrl },
     } = supabaseAdmin.storage.from(bucket).getPublicUrl(filePath);

@@ -1,6 +1,12 @@
 import { notFound } from "next/navigation";
 import { getInvestorPortalData } from "@/app/actions/investor-portal";
-import { getProjectDetailBySlug, checkInvestEligibility, parseInvestorClass } from "@/app/actions/marketplace";
+import {
+  getProjectDetailBySlug,
+  checkInvestEligibility,
+  parseInvestorClass,
+  getProjectClassBandSubscription,
+  getProjectConversionDemand,
+} from "@/app/actions/marketplace";
 import ProjectDetailClient from "./ProjectDetailClient";
 
 export async function generateMetadata({ params }) {
@@ -27,13 +33,17 @@ export default async function ProtectedProjectDetailPage({ params }) {
   const investorData = await getInvestorPortalData();
   const investorClassNum = await parseInvestorClass(investorData?.investor_class);
 
-  const project = await getProjectDetailBySlug(slug, investorClassNum);
+  const project = await getProjectDetailBySlug(slug, investorClassNum, investorData?.id);
 
   if (!project) {
     notFound();
   }
 
-  const eligibility = await checkInvestEligibility(project, investorClassNum, investorData?.id);
+  const [eligibility, classBandSubscription, conversionDemand] = await Promise.all([
+    checkInvestEligibility(project, investorClassNum, investorData?.id),
+    getProjectClassBandSubscription(slug, investorClassNum),
+    getProjectConversionDemand(slug, investorClassNum),
+  ]);
 
   return (
     <ProjectDetailClient
@@ -41,6 +51,8 @@ export default async function ProtectedProjectDetailPage({ params }) {
       investor={investorData}
       investorClass={investorClassNum}
       eligibility={eligibility}
+      classBandSubscription={classBandSubscription}
+      conversionDemand={conversionDemand}
     />
   );
 }

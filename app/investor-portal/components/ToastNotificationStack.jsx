@@ -11,6 +11,8 @@ import {
   Layers,
   ChevronDown,
   ChevronUp,
+  ShieldCheck,
+  Landmark,
 } from "lucide-react";
 import {
   getInvestorNotifications,
@@ -133,6 +135,48 @@ export default function ToastNotificationStack() {
           label: "Milestone",
           bg: "bg-indigo-500/10 text-indigo-700 border-indigo-200",
           icon: Layers,
+        };
+      case "onboarding":
+        return {
+          label: "Onboarding",
+          bg: "bg-blue-500/10 text-blue-700 border-blue-200",
+          icon: ShieldCheck,
+        };
+      case "banking":
+        return {
+          label: "Banking",
+          bg: "bg-purple-500/10 text-purple-700 border-purple-200",
+          icon: Landmark,
+        };
+      case "allocation_full":
+        return {
+          label: "Allocated",
+          bg: "bg-emerald-500/10 text-[#059669] border-emerald-200",
+          icon: CheckCheck,
+        };
+      case "allocation_partial":
+        return {
+          label: "Partially Allocated",
+          bg: "bg-teal-500/10 text-teal-700 border-teal-200",
+          icon: TrendingUp,
+        };
+      case "allocation_none":
+        return {
+          label: "Not Allocated",
+          bg: "bg-gray-500/10 text-gray-700 border-gray-200",
+          icon: Bell,
+        };
+      case "campaign_failed":
+        return {
+          label: "Campaign Failed",
+          bg: "bg-rose-500/10 text-rose-700 border-rose-200",
+          icon: Clock,
+        };
+      case "campaign_closed":
+        return {
+          label: "Campaign Closed",
+          bg: "bg-amber-500/10 text-amber-700 border-amber-200",
+          icon: Clock,
         };
       default:
         return {

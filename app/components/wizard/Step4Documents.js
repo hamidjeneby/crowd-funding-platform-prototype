@@ -144,7 +144,18 @@ export default function Step4Documents({ projectId, initialData, onNext, onPrev,
       await onUpdate();
       onNext(res);
     } catch (err) {
-      setError(err.message);
+      console.error("Step 4 save error:", err);
+      const isCodeError =
+        !err?.message ||
+        err.message.includes("is not defined") ||
+        err.message.includes("Cannot read") ||
+        err.name === "ReferenceError" ||
+        err.name === "TypeError";
+      setError(
+        isCodeError
+          ? "Something went wrong while saving. Please try again or contact support."
+          : err.message
+      );
       setUploading(false);
     }
   };

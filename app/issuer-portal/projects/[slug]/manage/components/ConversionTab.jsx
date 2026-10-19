@@ -55,7 +55,7 @@ export default function ConversionTab({ project }) {
         <div className="space-y-3 bg-emerald-50/70 p-5 rounded-2xl border border-emerald-200/80">
           <div className="flex flex-wrap items-center justify-between text-xs gap-2">
             <span className="font-bold text-[#064e3b] flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-[#059669]" /> Claimed Conversion Units ({conversionPercent}%)
+              <Sparkles className="w-4 h-4 text-[#059669]" /> Requested demand ({conversionPercent}%)
             </span>
             <span className="font-extrabold text-[#064e3b] text-sm">
               {pledgedConvertedUnits.toLocaleString()} / {totalConvertibleUnits.toLocaleString()} units
@@ -70,7 +70,7 @@ export default function ConversionTab({ project }) {
           </div>
 
           <p className="text-[11px] text-emerald-800 pt-1 font-medium">
-            Shows the portion of authorized conversion pool units claimed by active Class 1-4 investor pledges.
+            Shows the portion of authorized conversion pool units requested by active Class 1-4 investor pledges. Final units are confirmed at campaign close allocation.
           </p>
         </div>
 

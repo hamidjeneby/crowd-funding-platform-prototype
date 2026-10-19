@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Building2,
   AlertTriangle,
+  Landmark,
 } from "lucide-react";
 import {
   getInvestorNotifications,
@@ -117,6 +118,55 @@ export default function NotificationsPage() {
           iconBg: "bg-indigo-600 text-white",
           icon: Layers,
         };
+      case "onboarding":
+        return {
+          label: "Onboarding Update",
+          badgeBg: "bg-blue-100 text-blue-900 border-blue-300",
+          iconBg: "bg-blue-600 text-white",
+          icon: ShieldCheck,
+        };
+      case "banking":
+        return {
+          label: "Bank Verification",
+          badgeBg: "bg-purple-100 text-purple-900 border-purple-300",
+          iconBg: "bg-purple-600 text-white",
+          icon: Landmark,
+        };
+      case "allocation_full":
+        return {
+          label: "Allocated",
+          badgeBg: "bg-emerald-100 text-[#064e3b] border-emerald-300",
+          iconBg: "bg-[#064e3b] text-emerald-300",
+          icon: CheckCheck,
+        };
+      case "allocation_partial":
+        return {
+          label: "Partially Allocated",
+          badgeBg: "bg-teal-100 text-teal-900 border-teal-300",
+          iconBg: "bg-teal-600 text-white",
+          icon: TrendingUp,
+        };
+      case "allocation_none":
+        return {
+          label: "Not Allocated",
+          badgeBg: "bg-gray-100 text-gray-800 border-gray-300",
+          iconBg: "bg-gray-700 text-white",
+          icon: AlertTriangle,
+        };
+      case "campaign_failed":
+        return {
+          label: "Campaign Failed",
+          badgeBg: "bg-rose-100 text-rose-900 border-rose-300",
+          iconBg: "bg-rose-600 text-white",
+          icon: AlertTriangle,
+        };
+      case "campaign_closed":
+        return {
+          label: "Campaign Closed",
+          badgeBg: "bg-amber-100 text-amber-900 border-amber-300",
+          iconBg: "bg-amber-500 text-white",
+          icon: Clock,
+        };
       default:
         return {
           label: "System Notice",
@@ -184,6 +234,9 @@ export default function NotificationsPage() {
       <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-gray-100">
         {[
           { id: "all", label: "All Notifications" },
+          { id: "allocation", label: "Allocations & Closing" },
+          { id: "onboarding", label: "Onboarding" },
+          { id: "banking", label: "Bank Verification" },
           { id: "campaign_alert", label: "Campaign Alerts" },
           { id: "funding_threshold", label: "Funding Thresholds" },
           { id: "conversion_pool", label: "Conversion Pool Alerts" },

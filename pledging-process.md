@@ -26,26 +26,35 @@
 
 ## Overview
 
-The pledging process is the core investor action on the platform. When an
-investor pledges into a Sharia-compliant project, the system must:
+The platform uses a **"request, then allocate"** pledge model. Pledges made during an active campaign represent conditional investment requests with `status = 'pending'`, rather than immediate guaranteed allocations or first-come-first-served asset claims.
 
-1. Verify the investor's eligibility (class, status, limits)
-2. Check that the investor has not already pledged to this project (Single Pledge per Project rule)
-3. Validate the amount against floor, ceiling, and hard cap
-4. Calculate the investor fee based on their class at the time of pledge
-5. Calculate `pledged_units` = `floor(pledged_amount / unit_price)`
-6. Verify sufficient wallet balance for both the pledge amount and fee
-7. Create a **pledge** record in the `pledges` table (including `pledged_units` and `conversion_eligible_units`)
-8. Deduct the total (pledge + fee) from the investor's wallet
-9. Freeze the investor's class and fee rate at pledge time (snapshot rule)
+At campaign close, a single centralized allocation run prioritizes all active requests according to deterministic rules:
+1. **Investor Class** (Class 1 highest priority down to Class 10 lowest priority)
+2. **Pledge Amount** (larger pledges prioritized over smaller pledges within the same class)
+3. **Pledged Timestamp** (`pledged_at` earliest first within the same class and amount tier)
 
-*Note: The platform has eliminated the separate `holdings` database table. All pledges, allocated holdings, and conversion rights are maintained directly on rows within the `pledges` table. A pledge row dynamically transitions from a pledge to a holding when its `status` transitions to `allocated` (or `active` / `completed`), at which point `allocated_amount` is set and used for holding valuations and portfolio math.*
+This priority allocation governs both project principal capacity and conversion pool rights, replacing older first-come-first-served consumption.
+
+When an investor submits a pledge request, the system:
+1. Verifies the investor's eligibility (class, KYC/onboarding status, class ceilings)
+2. Checks that the investor has not already pledged to this project (Single Pledge per Project rule)
+3. Verifies the campaign's oversubscription ceiling (`MAX_OVERSUBSCRIPTION_PERCENT = 150%` of capacity, where capacity is `hard_cap || target_goal`)
+4. Verifies mandatory acceptance of subscription terms (`acceptedTerms === true`)
+5. Captures audit signing metadata (`signed_at` UTC timestamp and `signed_ip` client IP)
+6. Calculates the investor fee based on their frozen class at pledge time
+7. Calculates `pledged_units` = `floor(pledged_amount / unit_price)`
+8. Calculates `requested_conversion_units` = `floor(min(pledged_amount, classCap) / unit_price)` for Classes 1–4 on eligible projects
+9. Verifies sufficient wallet balance for total deduction (pledge principal + investor fee)
+10. Inserts a pending record into `pledges` with snapshot metadata
+11. Inserts a `subscription_agreement` record into `pledge_docs` (`file_url: null`, `terms_version: "v1.0"`)
+12. Dispatches an asynchronous fire-and-forget webhook to Make for background PDF generation & emailing
+13. Deducts the total commitment from the investor's wallet balance into escrow
 
 ---
 
 ## Pre-Conditions Before Pledging
 
-Before the "Invest Now" button is even enabled, the following must be true:
+Before the "Invest Now" / "Submit Pledge Request" button is enabled, the following must be true:
 
 | Condition | Checked By | Enforcement |
 |---|---|---|
@@ -58,96 +67,119 @@ Before the "Invest Now" button is even enabled, the following must be true:
 | Investor has **NOT** already pledged to this project | `checkInvestEligibility()` | Server-side (`pledges` table lookup) |
 | Investor's class max pledge ≥ project's min floor | `checkInvestEligibility()` | Server-side |
 | Active pledge limit not exceeded (Class 10) | `checkInvestEligibility()` | Server-side |
-| Project has not reached hard cap | Hard cap check | Server-side |
+| Campaign oversubscription ceiling not exceeded | Ceiling check (`≤ 150%`) | Server-side |
 
-If any condition fails, the invest button is disabled and a reason is shown.
+If any condition fails, the invest button is disabled and a clear reason is displayed.
 
 ---
 
 ## Step-by-Step Pledge Flow
 
 ### Phase 1: Investor Opens Pledge Modal
-
 ```
-Investor clicks "Invest Now"
-  → Modal opens with:
+Investor clicks "Invest Now" / "Submit Pledge Request"
+  → Modal titled "Pledge request" opens with:
     - Current wallet balance displayed
     - Input field pre-filled with min_investment_floor
-    - Class max pledge limit shown
-    - Fee rate for their class shown
+    - Class maximum pledge limit shown
+    - Investor fee rate for their class shown
+    - Estimated units acquired = floor(amount / unit_price)
+    - Eligible conversion units (maximum) and customizable requested conversion units input with reduction/opt-out controls (Classes 1–4 on eligible convertible projects)
+    - "How your pledge works" disclosure panel (PLEDGE_DISCLOSURES)
+    - Unchecked-by-default legal agreement checkbox: "I've read and accept the subscription terms for this pledge"
 ```
 
-### Phase 2: Investor Enters Amount
-
+### Phase 2: Investor Enters Amount & Customizes Options
 ```
-Investor enters a pledge amount
+Investor enters pledge amount and reviews disclosures
   → Client instantly computes and displays:
     - Fee amount = pledged_amount × (fee_percent / 100)
     - Total wallet deduction = pledged_amount + fee_amount
-    - Estimated units acquired = floor(pledged_amount / unit_price)
-    - Remaining wallet balance after pledge
-    - Warning if insufficient funds
+    - Estimated units and maximum eligible conversion units
+    - Option for Class 1–4 investors to reduce requested conversion units (down to 0) if they prefer not to convert all Sukuk to shares
+    - Remaining wallet balance after deduction
+    - Warning if insufficient wallet balance
+Investor checks the subscription terms checkbox
+  → "Submit pledge" button becomes active (disabled if checkbox unchecked)
 ```
 
 ### Phase 3: Investor Submits Pledge
-
 ```
-Investor clicks "Confirm Pledge"
-  → Client calls server action: createPledge({ projectId, slug, amount })
+Investor clicks "Submit pledge"
+  → Client calls server action:
+    createPledge({ projectId, slug, amount, acceptedTerms: true })
 ```
 
 ### Phase 4: Server-Side Validation (in order)
-
 ```
-1. Auth check — reject if not logged in
-2. Parse & validate amount — reject if ≤ 0 or NaN
-3. Fetch investor data — reject if no profile
-4. Fetch project with visibility check — reject if not found/visible
-5. Re-verify eligibility (including Single Pledge per Project check) — reject if campaign not live, already pledged, or limits exceeded
-6. Min floor check — reject if amount < min_investment_floor
-7. Max pledge check — reject if amount > CLASS_CONFIG[class].maxPledge
-8. Hard cap check — reject if live_raised + amount > hard_cap
-9. Fee calculation — fee_percent from CLASS_CONFIG, fee_amount computed
-10. Units calculation — pledged_units = floor(amount / unit_price)
-11. Wallet check — reject if wallet_balance < (amount + fee_amount)
+1. Auth check — reject if not authenticated
+2. Terms acceptance check — reject if acceptedTerms !== true
+3. Parse & validate amount — reject if ≤ 0 or NaN
+4. Fetch investor data — reject if no profile
+5. Fetch project with visibility check — reject if not found/visible
+6. Re-verify eligibility (including Single Pledge per Project check) — reject if campaign not live, already pledged, or limits exceeded
+7. Min floor check — reject if amount < min_investment_floor
+8. Max pledge check — reject if amount > CLASS_CONFIG[class].maxPledge
+9. Oversubscription ceiling check — reject if currentLiveSubscribed + amount > capacity * 1.5
+10. Fee calculation — fee_percent from CLASS_CONFIG, fee_amount computed
+11. Unit & conversion calculation — pledged_units & requested_conversion_units computed
+12. Wallet check — reject if wallet_balance < (amount + fee_amount)
+13. Client IP & Timestamp capture — signed_at = now() (ISO), signed_ip from request headers
 ```
 
-### Phase 5: Database Writes (atomic sequence)
-
+### Phase 5: Database Writes & Webhook Dispatch
 ```
 1. INSERT into pledges table:
    {
      project_id,
      investor_id,
      pledged_amount,
-     pledged_units,                    // Number of units purchased
-     conversion_eligible_units,        // Computed live for Classes 1–4
+     pledged_units,
+     requested_conversion_units,       // Computed demand for Classes 1–4
+     conversion_eligible_units: null,  // Decided upon campaign close allocation
      allocated_amount: null,           // Populated upon campaign allocation
+     allocated_units: null,
+     allocation_rank: null,
      investor_class_at_pledge,         // FROZEN snapshot
      fee_percent_at_pledge,            // FROZEN snapshot
      fee_amount,                       // Computed fee
+     refunded_amount: 0,
+     refunded_fee: 0,
      status: "pending",
-     pledged_at: now(),
-     allocated_at: null,
-     payment_status: "completed"       // Wallet was debited
+     pledged_at: signed_at,
+     payment_status: "completed"
    }
 
-2. UPDATE investors table:
+2. INSERT into pledge_docs table:
+   {
+     pledge_id: pledgeRow.id,
+     doc_type: "subscription_agreement",
+     terms_version: "v1.0",
+     signed_at: signed_at,
+     signed_ip: signed_ip,
+     file_url: null,
+     generated_at: null
+   }
+
+3. UPDATE investors table:
    SET wallet_balance = wallet_balance - (pledged_amount + fee_amount)
    WHERE id = investor_id
+
+4. DISPATCH Make Webhook (sendSubscriptionAgreementWebhook):
+   Fire-and-forget POST to MAKE_SUBSCRIPTION_AGREEMENT_WEBHOOK_URL / MAKE_WEBHOOK_URL
+   with x-make-apikey header. Errors logged without rolling back the pledge.
 ```
 
 ### Phase 6: Response & UI Update
-
 ```
 Server returns:
   { success: true, pledge, feeAmount, totalDeducted, newBalance }
 
 Client shows:
-  - Success confirmation with pledge details
-  - Fee breakdown recap
-  - Updated wallet balance
-  - Link to portfolio to view pledge
+  - Success screen: "Pledge Submitted!"
+  - Confirmation message: "Pledge submitted. Allocation happens when the campaign closes. Your subscription agreement will be emailed to you shortly."
+  - Financial breakdown recap
+  - Button to view in Portfolio
 ```
 
 ---
@@ -210,18 +242,23 @@ The separate `holdings` database table has been **completely removed**.
 
 | Field | Value | Source & Role |
 |---|---|---|
-| `id` | Unique ID | Primary Key |
+| `id` | Unique ID | Primary Key (bigint / integer) |
 | `project_id` | Project's ID | Foreign key to `projects` |
-| `investor_id` | Investor's ID | Foreign key to `investors` |
+| `investor_id` | Investor's ID | Foreign key to `investors` (internal integer PK) |
 | `pledged_amount` | The amount committed by investor | User input at pledge time |
-| `pledged_units` | Units purchased | `floor(pledged_amount / unit_price)` |
-| `conversion_eligible_units` | Units eligible for equity conversion | Computed live at pledge time (Classes 1–4 only) |
+| `pledged_units` | Units requested | `floor(pledged_amount / unit_price)` |
+| `requested_conversion_units` | Convertible units requested | `floor(min(pledged_amount, classCap) / unit_price)` (Classes 1–4 only) |
+| `conversion_eligible_units` | Allocated convertible units | Set at campaign close during allocation (`null` during campaign) |
 | `allocated_amount` | Final allocated holding value | Set during campaign allocation phase (null while `status = 'pending'`) |
+| `allocated_units` | Final allocated unit count | Set during campaign close allocation |
+| `allocation_rank` | Deterministic priority rank | Calculated during allocation run |
 | `investor_class_at_pledge` | e.g., 3 | Frozen snapshot from investor's profile |
 | `fee_percent_at_pledge` | e.g., 0.7 | Frozen snapshot from CLASS_CONFIG |
 | `fee_amount` | Computed fee | `pledged_amount × fee_percent / 100` |
-| `status` | `"pending"`, `"allocated"`, `"active"`, `"completed"`, `"cancelled"`, or `"refunded"` | Controls whether row is a Pledge or Holding |
-| `pledged_at` | Timestamp | Set at pledge submission |
+| `refunded_amount` | Principal refunded | Set if pledge is partially allocated or rejected |
+| `refunded_fee` | Proportionate fee refunded | Set if pledge is partially allocated or rejected |
+| `status` | `"pending"`, `"allocated"`, `"rejected_oversubscribed"`, `"active"`, `"completed"`, `"cancelled"`, or `"refunded"` | Lifecycle state of pledge |
+| `pledged_at` | Timestamp | Set at pledge submission (ISO UTC) |
 | `allocated_at` | Timestamp | Set when campaign completes and allocation occurs |
 | `redeemed_at` | Timestamp | Set when investment matures/redeems |
 | `payment_status` | `"completed"` | Wallet debit status |
@@ -238,28 +275,32 @@ pledged_units = Math.floor(pledged_amount / unit_price)
 
 If `unit_price` is not set or is 0, `pledged_units` defaults to 0.
 
-### Conversion Eligible Units (Stored on `pledges.conversion_eligible_units`)
+### Conversion Demand Computation (Stored on `pledges.requested_conversion_units`)
 
-Calculated live at pledge creation when:
-- Project is not `spv_equity`
-- `is_conversion_enabled = true` on `spv_details`
-- Investor is Class 1, 2, 3, or 4 (Classes 5–10 receive 0 conversion units)
+Under the **request, then allocate** model, conversion pool units are not consumed first-come-first-served. Instead, requested conversion units are captured at pledge creation and allocated by priority at campaign close:
 
-**Mathematical Calculation Algorithm:**
-1. **Calculate Remaining Share Pool Capacity:**
-   $$\text{remaining\_shares\_capacity} = \text{total\_shares\_authorized} - \left( \text{conversion\_ratio\_shares} \times \sum_{\text{pledges}} \text{conversion\_eligible\_units} \right)$$
-   If $\text{remaining\_shares\_capacity} \le 0$, then `conversion_eligible_units = 0`.
-2. **Apply Investor Class Conversion Cap:**
+- Project must not be `spv_equity`
+- `conversion_enabled = true` on `spv_details`
+- Investor must be Class 1, 2, 3, or 4 (Classes 5–10 receive 0 requested conversion units)
+
+**Pledge-Time Formula:**
+1. **Apply Investor Class Conversion Cap:**
    - Class 1: Unlimited
    - Class 2: AED 1,000,000
    - Class 3: AED 500,000
    - Class 4: AED 250,000
    $$\text{effective\_amount} = \min(\text{pledged\_amount}, \text{class\_conversion\_cap})$$
-3. **Compute Raw Conversion Shares:**
-   $$\text{raw\_calculated\_shares} = \left\lfloor \frac{\text{effective\_amount}}{\text{unit\_price}} \right\rfloor \times \text{conversion\_ratio\_shares}$$
-4. **Cap by Share Pool Capacity and Convert to Sukuk Units:**
-   $$\text{assigned\_shares} = \min(\text{raw\_calculated\_shares}, \text{remaining\_shares\_capacity})$$
-   $$\text{conversion\_eligible\_units} = \left\lfloor \frac{\text{assigned\_shares}}{\text{conversion\_ratio\_shares}} \right\rfloor$$
+2. **Compute Maximum Eligible Conversion Units:**
+   $$\text{max\_eligible\_conversion\_units} = \left\lfloor \frac{\text{effective\_amount}}{\text{unit\_price}} \right\rfloor$$
+3. **Investor Customization (Reduction Option):**
+   - The pledge modal displays the maximum conversion units the investor is eligible for.
+   - Eligible investors (Classes 1–4) can choose to reduce their requested conversion units (down to 0 via numeric input, "0 (Opt Out)" button, or "Max" button).
+   - If reduced, $\text{requested\_conversion\_units} = \max(0, \min(\text{user\_units}, \text{max\_eligible\_conversion\_units}))$.
+   - Any units not requested for conversion remain as standard non-convertible Sukuk.
+4. `conversion_eligible_units` is set to `null` on the pledge record during the campaign. Official conversion units are formally granted during the campaign close allocation run, prioritized by:
+   - Investor Class (Class 1 highest)
+   - Pledge Amount (largest first)
+   - Timestamp `pledged_at` (earliest first)
 
 ---
 
@@ -270,20 +311,21 @@ Calculated live at pledge creation when:
 | # | Check | Error Message |
 |---|---|---|
 | 1 | User is authenticated | "You must be logged in to pledge an investment." |
-| 2 | Amount is a valid positive number | "Please enter a valid investment amount." |
-| 3 | Investor profile exists | "Investor profile not found. Please complete onboarding first." |
-| 4 | Project is visible to class | "Project not found or not eligible for your investor class." |
-| 5 | Campaign is live | "Campaign is not currently live." |
-| 6 | Single pledge per project | "You have already pledged to this project. Each investor is limited to one pledge per project." |
-| 7 | Amount ≥ min_investment_floor | "Investment amount cannot be lower than the minimum floor of {currency} {floor}." |
-| 8 | Amount ≤ CLASS_CONFIG[class].maxPledge | "Investment amount exceeds your Class {n} maximum pledge limit of {currency} {max}." |
-| 9 | live_raised + amount ≤ hard_cap | "This pledge would exceed the campaign's hard cap. Maximum remaining: {currency} {remaining}." |
-| 10 | Wallet ≥ amount + fee | "Insufficient wallet balance. You need {currency} {total} but have {currency} {balance}. Please top up your wallet." |
-| 11 | Active pledge limit (Class 10) | "Class 10 investors are limited to 1 active pledge at a time." |
+| 2 | Terms accepted | "You must read and accept the subscription terms to submit a pledge." |
+| 3 | Amount is a valid positive number | "Please enter a valid investment amount." |
+| 4 | Investor profile exists | "Investor profile not found. Please complete onboarding first." |
+| 5 | Project is visible to class | "Project not found or not eligible for your investor class." |
+| 6 | Campaign is live | "Campaign is not currently live." |
+| 7 | Single pledge per project | "You have already pledged to this project. Each investor is limited to one pledge per project." |
+| 8 | Amount ≥ min_investment_floor | "Investment amount cannot be lower than the minimum floor of {currency} {floor}." |
+| 9 | Amount ≤ CLASS_CONFIG[class].maxPledge | "Investment amount exceeds your Class {n} maximum pledge limit of {currency} {max}." |
+| 10 | Oversubscription ceiling check (`≤ 150%`) | "This pledge would exceed the campaign's maximum oversubscription limit (150% of capacity). Maximum remaining: {currency} {remaining}." |
+| 11 | Wallet balance ≥ amount + fee | "Insufficient wallet balance. You need {currency} {total} but have {currency} {balance}. Please top up your wallet." |
+| 12 | Active pledge limit (Class 10) | "Class 10 investors are limited to 1 active pledge at a time." |
 
 ### Single Pledge per Project Rule
 
-Investors are restricted to **a single pledge per project**. If an investor attempts to make a second pledge on a project they have already pledged into (where `status` is not `cancelled` or `refunded`), the system blocks the request both at page load (disabling the invest button) and at server action submission.
+Investors are restricted to **a single pledge per project**. If an investor attempts to make a second pledge on a project they have already pledged into (where `status` is not in `('cancelled', 'refunded', 'rejected_oversubscribed')`), the system blocks the request both at page load (disabling the invest button) and at server action submission.
 
 ---
 
@@ -291,56 +333,121 @@ Investors are restricted to **a single pledge per project**. If an investor atte
 
 After a successful pledge:
 
-### Live Raised Amount Calculation
-Project funding totals on `/investor-portal/marketplace` and `/investor-portal/projects/[slug]` are live-calculated by querying the `pledges` table:
+### Live Subscribed Amount Calculation
+Project funding totals on `/investor-portal/marketplace`, `/investor-portal/projects/[slug]`, and issuer dashboards are calculated live from active pledges:
 ```sql
 SELECT project_id, SUM(pledged_amount) 
 FROM pledges 
-WHERE project_id IN (...) AND status NOT IN ('cancelled', 'refunded') 
+WHERE project_id IN (...) 
+  AND status NOT IN ('cancelled', 'refunded', 'rejected_oversubscribed') 
 GROUP BY project_id;
 ```
 
-### Funding Percentage Calculation
-The funding progress percentage is computed using total pledged amounts divided by `target_goal`, formatted to **1 decimal place**:
-```javascript
-const rawPercent = targetGoal > 0 ? (liveRaisedAmount / targetGoal) * 100 : 0;
-const progressPercent = Math.min(rawPercent, 100).toFixed(1);
-```
+### Display Terminology & Progress Formatting
+- **Live Campaign Label**: Uses **"Subscribed so far"** and **"X% Subscribed"** (NOT "Raised" or "Funded"). Post-allocation, campaigns switch to "Funded".
+- **Unconstrained Display Percentage**: Displayed percentages are unconstrained (e.g. `124.5% Subscribed`).
+- **Clamped Visual Bars**: Visual progress bars are clamped at 100% width.
+- **Oversubscribed Badge**: An amber "Oversubscribed" badge is rendered whenever `rawPercent > 100%`.
 
 ---
 
-## Pledge Lifecycle, Status Transitions & Holdings Derivation Rules
+## Pledge Lifecycle, Status Transitions & Allocation Rules
 
-Holdings and pledges are no longer stored in separate tables. Instead, all positions exist in the `pledges` table and are categorized according to their `status` field.
+Holdings and pledges are unified in the `pledges` table and categorized according to their `status` field.
 
 ### Status Field Mapping Rules
 
 ```
 pledges table row status
    │
-   ├── "pending" ────────────────────► Categorized as a PLEDGE (Awaiting campaign close)
-   │                                   - Displayed in "Pledges" tab
-   │                                   - Valuation = pledged_amount
+   ├── "pending" ────────────────────────► PLEDGE REQUEST (Awaiting campaign close)
+   │                                       - Displayed in "Pledges" tab as "Pending allocation"
+   │                                       - Valuation = pledged_amount
    │
-   ├── "allocated" | "active" | "completed" ──► Categorized as a HOLDING (Campaign funded/allocated)
+   ├── "allocated" | "active" | "completed" ──► ALLOCATED HOLDING (Campaign closed & allocated)
    │                                           - Displayed in "Holdings" tab & Portfolio Page
-   │                                           - allocated_amount is populated
+   │                                           - allocated_amount and allocated_units populated
+   │                                           - ownership_percentage populated for spv_equity
    │                                           - Valuation = allocated_amount
    │
-   └── "cancelled" | "refunded" ────► EXCLUDED ENTIRELY
-                                       - Excluded from pledges tab, holdings tab, and portfolio page
+   ├── "rejected_oversubscribed" ────────► NOT ALLOCATED (Oversubscription priority cutoff)
+   │                                       - Displayed in "Pledges" tab as "Not allocated"
+   │                                       - Full principal & fee refunded to wallet
+   │
+   ├── "refunded" ───────────────────────► REFUNDED (Campaign failed or late pledge)
+   │                                       - Displayed in "Pledges" tab as "Refunded"
+   │                                       - Full principal & fee refunded to wallet
+   │
+   └── "cancelled" ──────────────────────► CANCELLED (Prior to campaign_end_date)
+                                           - Excluded from holdings & portfolio
 ```
 
+### Allocation & Refund Rules at Campaign Close
+> See [project-closing.md](file:///Users/marchakimmwai/Desktop/unoffical-projects/crowd-funding-platform-prototype/project-closing.md) for full technical documentation of the automated campaign closing pipeline (`lib/closing/`, `/api/cron/close-campaigns`, `/api/internal/close-project`, and `apply_project_close`).
+
+1. **Deadline Enforcement & Late Pledges:**
+   - `createPledge`, `checkInvestEligibility`, and `cancelPledge` reject new pledges or cancellations once `now() >= campaign_end_date`.
+   - Any `pending` pledge with `pledged_at > campaign_end_date` is excluded from allocation, marked `status = 'refunded'`, and refunded in full (`pledged_amount + fee_amount`).
+2. **Allocation Priority Order:**
+   - **Criterion 1 (Investor Class):** Class 1 pledges are allocated first, then Class 2, Class 3, ..., down to Class 10.
+   - **Criterion 2 (Pledge Amount):** Larger pledge amounts within the same class are allocated before smaller amounts.
+   - **Criterion 3 (Submission Time):** Earliest `pledged_at` timestamps break any ties.
+3. **Whole-Unit Rounding & Minimum Floor:**
+   - Allocations round down to whole units (`floor(amount / unit_price) * unit_price`) across all contract types.
+   - If a rounded fill is below `min_investment_floor`, that pledge receives `0` and the allocation loop continues to the next pledge in priority order.
+4. **Partial Allocations & Unit Rounding Remainders:**
+   - When a pledge is partially filled (or has a unit-rounding remainder), `allocated_amount` and `allocated_units` reflect the filled whole units.
+   - Only the unallocated principal (`pledged_amount - allocated_amount`) is refunded to the investor's wallet; the platform fee is **not** refunded on partial fills.
+5. **Rejected Oversubscribed & Failed Campaign Pledges:**
+   - Pledges receiving `0` units on a funded campaign receive `status = 'rejected_oversubscribed'` (preserving their `allocation_rank`) and a 100% refund of principal + fee (`pledged_amount + fee_amount`).
+   - If total allocated funds (plus `applyUnderwriting`, currently stubbed to `0`) are below `soft_cap`, the campaign fails (`status = 'failed'`, `failure_reason = 'soft_cap_not_met'` or `'no_pledges'`) and all pledges receive `status = 'refunded'` and a 100% refund of principal + fee.
+6. **Wallet Transactions Ledger (`wallet_transactions`):**
+   - Every wallet movement records a ledger entry with `balance_after`: `top_up` on wallet top-ups, `pledge_debit` on pledge submission, and `refund_credit` (protected by `UNIQUE (pledge_id, type) WHERE pledge_id IS NOT NULL`) inside the `apply_project_close` database transaction.
+
+---
+
+## Subscription Agreement Webhook (Make Integration)
+
+Upon every successful pledge submission, the backend dispatches a webhook to Make for automated subscription agreement generation and delivery.
+
+### Security Guarantees
+- **No PII**: No investor names, email addresses, phone numbers, or residential addresses are transmitted in the payload.
+- **No Financial Secrets**: No wallet balances, bank accounts, or credentials are sent.
+- **Audit Metadata Only**: Transmits public project identifiers, financial parameters, timestamp, client IP, and terms version.
+
+### Payload Schema
+```json
+{
+  "eventType": "subscription_agreement_requested",
+  "pledgeId": 12345,
+  "investorId": 678,
+  "projectId": 90,
+  "projectSlug": "greengrid-solar-phase-ii",
+  "pledgedAmount": 10000,
+  "estimatedUnits": 40,
+  "requestedConversionUnits": 40,
+  "investorClass": 2,
+  "feePercent": 0.6,
+  "feeAmount": 60,
+  "currency": "AED",
+  "shariaContractType": "mudarabah",
+  "termsVersion": "v1.0",
+  "signedAt": "2026-10-12T16:00:00.000Z",
+  "signedIp": "192.0.2.1",
+  "timestamp": "2026-10-12T16:00:00.000Z"
+}
+```
 ### Detailed Status Definitions
 
 | Status | Category | Meaning & Behavior |
 |---|---|---|
-| `pending` | **Pledge** | Pledge submitted and wallet debited; campaign is live and awaiting close & allocation. Counted under active pledges. |
-| `allocated` | **Holding** | Campaign closed successfully and funds allocated. The row officially becomes an active **Holding**. The `allocated_amount` field is populated with the final allocated amount. |
+| `pending` | **Pledge** | Pledge submitted and wallet debited; campaign is live and awaiting close & allocation. Displayed in "Pledges" tab as "Pending allocation". |
+| `allocated` | **Holding** | Campaign closed successfully and funds allocated. The row officially becomes an active **Holding**. The `allocated_amount` and `allocated_units` fields are populated with the final allocated amount. |
+| `rejected_oversubscribed` | **Pledge** | Campaign closed oversubscribed and this pledge was ranked below the priority cutoff. Not allocated. 100% of principal and fee refunded to wallet. Displayed in "Pledges" tab as "Not allocated". |
 | `active` | **Holding** | Sukuk or equity certificates formally issued to investor. Treated as an active holding using `allocated_amount`. |
 | `completed` | **Holding** | Investment matured or redeemed. Retained as a historical holding position using `allocated_amount`. |
 | `cancelled` | **None** | Pledge was cancelled prior to allocation. Wallet refunded. **Excluded from both pledges and holdings.** |
-| `refunded` | **None** | Campaign failed to reach minimum goal. Full refund issued. **Excluded from both pledges and holdings.** |
+| `refunded` | **Pledge** | Campaign failed to reach soft cap goal (or pledge arrived after `campaign_end_date`). Full refund of principal and fee issued to wallet. Displayed in "Pledges" tab as "Refunded". |
 
 ---
 

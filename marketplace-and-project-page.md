@@ -286,15 +286,17 @@ Each project card in the marketplace grid renders:
    - Sharia Contract Tag: Badged by contract type (e.g., `MUDARABAH`, `SPV EQUITY`).
 3. **Title & Summary**: Project title and 2-line truncated summary.
 4. **Live Funding Progress**:
-   - Total Pledged Amount = `SUM(pledges.pledged_amount)` for this project where `status != 'cancelled'`.
+   - Total Subscribed Amount = `SUM(pledges.pledged_amount)` for this project where `status NOT IN ('cancelled', 'refunded', 'rejected_oversubscribed')`.
    - Target Goal = `projects.target_goal`.
-   - Funding Percentage = `((total_pledged / target_goal) * 100).toFixed(1)` (e.g., `18.2%`).
-   - Funding Progress Bar: Visual bar capped at 100%.
-5. **Conversion Pool Percentage Bar (Classes 1–4 Only)**:
+   - Subscription Percentage = `((total_subscribed / target_goal) * 100).toFixed(1)` (unconstrained, e.g. `124.5% Subscribed`).
+   - Funding Progress Bar: Clamped at 100% visual fill.
+   - **Oversubscribed Badge**: Renders when `rawPercent > 100%`.
+5. **Requested Conversion Demand Bar (Classes 1–4 Only)**:
    - Visible **ONLY** to Class 1, 2, 3, and 4 investors when conversion is enabled. **Hidden for Classes 5–10.**
    - Total Convertible Units = `floor(total_shares_authorized / conversion_ratio_shares)`.
-   - Pledged Converted Units = `SUM(pledges.conversion_eligible_units)` for this project.
-   - Conversion Percentage = `((pledged_converted_units / total_convertible_units) * 100).toFixed(1)`.
+   - Requested Converted Units = `SUM(pledges.requested_conversion_units ?? pledges.conversion_eligible_units)`.
+   - Demand Percentage = `((requested_units / total_convertible_units) * 100).toFixed(1)`.
+   - Label: `Requested demand ({percent}%)`.
 6. **Campaign Deadline Badge**:
    - Formatted in UTC: `formatUtcDate(campaign_end_date)` -> e.g. `31 Dec 2027, 21:00 UTC`.
 7. **Key Metrics**:
@@ -307,36 +309,54 @@ Each project card in the marketplace grid renders:
 
 ## 5. Individual Project Page (`/investor-portal/projects/[slug]`)
 
-The Individual Project page presents deep due-diligence data and the interactive **Investment Action Panel**.
+The Individual Project page presents deep due-diligence data, segmented allocation analytics, and the interactive **Investment Action Panel**.
 
 ### 5.1 Hero Banner & Overview Section
 - **Title & Issuer Name**: Official project title and issuing entity legal name.
 - **Contract & Compliance Badges**: Sharia contract type, Sharia compliance status (`pending` / `verified`), `Conversion Available` badge (if applicable), SPV structure badge.
 - **Cover Image & Primary Action**: Large hero visual.
+- **Capitalization Metrics**: "Subscribed so far", unconstrained display percentage (e.g. `130% Subscribed`), and "Oversubscribed" badge.
 
-### 5.2 Detailed Content Sections
-1. **Overview**:
-   - Rendered HTML full description (`full_description`) sanitized via DOMPurify.
-   - Highlights the core problem, solution, revenue model, and market impact.
-2. **Roadmap & Milestones**:
-   - Displays combined list of **Issuer Milestones** and **System Milestones** (`campaign_live`, `campaign_funded`, `custody_transfer_complete`).
-   - Ordered chronologically by `target_date`.
-   - Dates displayed in UTC (`formatUtcDateOnly` / `formatUtcDate`).
-3. **Document Vault**:
-   - Secure links to project documents (`pitch_deck`, `balance_sheet`, `valuation_report`, `cap_table`, `spv_registration`).
-4. **Media Gallery**:
-   - Grid gallery of supplementary images from `project_media` with interactive modal viewer.
-5. **SPV & Legal Entity Details**:
-   - Legal entity name, registration authority, registration number, Sharia compliance certificate link.
-6. **Dedicated Equity Conversion Privileges & Terms Card (Classes 1–4 Only)**:
-   - Visible **ONLY** to Class 1–4 investors when project has conversion enabled.
-   - Displays:
-     - Conversion Trigger Share Price (`conversion_trigger_price`).
-     - Conversion Ratio (`1 Sukuk unit = X shares`).
-     - Conversion Cutoff / Deadline formatted in **UTC** (`conversion_deadline`).
-     - Investor Class Conversion Value Cap (Class 1: Unlimited, Class 2: AED 1M, Class 3: AED 500k, Class 4: AED 250k).
-     - Conversion Pool Capacity Progress Bar & Remaining Pool Units.
-     - Conversion Clauses & Governing Legal Terms (`conversion_clauses`).
+### 5.2 Segmented Visual Progress Analytics
+
+#### A. Class Band Subscription Bar ("Subscribed so far")
+Displays the distribution of live pledge commitments segmented by investor class band:
+- **Priority Color Grading**: Darker emerald tones represent higher allocation priority (Class 1 darkest `#022c22`, Class 2 `#064e3b`, Class 3 `#047857`, Class 4 `#0d9488`, Retail `#34d399`).
+- **Viewer Band Highlight**: Outlined with an amber highlight ring to identify the viewer's position in the capital stack.
+- **100% Target Marker**: Vertical indicator when oversubscribed showing where the campaign target/capacity sits relative to total commitments.
+- **Soft Cap Marker**: Dashed indicator showing the minimum viable capitalization threshold.
+- **Privacy Threshold**:
+  - *Standard Contracts*: Privacy merging applies strictly to high-class tiers (Class 1 and Class 2–4). If either has fewer than 3 pledges, they merge into **Class 1–4** (maximum grouping). Lower tiers (**Class 5–7** and **Class 8–10**) never merge, remaining distinct regardless of pledge count to ensure retail tiers are never conflated with high-net-worth tiers.
+  - *SPV Equity Projects (`spv_equity`)*: Because SPV equity projects are restricted to Class 1–4 investors only, the subscription bar splits into two distinct bands: **Class 1–2** (`#022c22`) and **Class 3–4** (`#047857`). No 3-pledge privacy merge is applied: even if there is only 1 pledge in a tier, it renders separately as **Class 1–2** or **Class 3–4** with its respective percentage.
+- **Viewer Callout Alert**: Dynamic copy below the bar communicating projected allocation:
+  - Band fully within 100%: *"At current subscription levels, your class band is projected to be fully allocated at campaign close."*
+  - Band spans across 100%: *"At current subscription levels, your class band may be partially allocated. Allocation prioritises larger pledges, then earlier pledges."*
+  - Band entirely beyond 100%: *"At current subscription levels, pledges in your class are not projected to be allocated unless higher-priority pledges are cancelled before close."*
+
+#### B. Conversion Demand Bar (Classes 1–4 Only)
+Replaces the old first-come-first-served conversion pool bar:
+- Displays **"Requested demand"** with total requested units vs authorized pool units.
+- **Low Demand Coarse State**: If fewer than 3 pledges have requested conversion units, displays a privacy-safe "Low demand" badge without disclosing exact pledge counts.
+- **Viewer Priority Marker**: Displays a vertical indicator marking pledges at or above the viewer's investor class.
+- **Oversubscribed Indicator**: Alerts investors when total demand exceeds available equity conversion capacity, noting that units will be allocated by class priority at close.
+
+### 5.3 Detailed Content Sections
+1. **Overview**: Rendered HTML full description sanitized via DOMPurify.
+2. **Financial & Offer Terms**:
+   - **Funding Targets**: Target Goal, Soft Cap, Hard Cap, and Campaign Deadline in UTC.
+   - **Unit Terms**:
+     - Price label is dynamically rendered: displays **"Share Price:"** when `unit_type === 'shares'` (or `sharia_contract_type === 'spv_equity'`), and **"Unit / Sukuk Price:"** when `unit_type === 'sukuk'`.
+     - Displays Unit Type and Total Authorized Units.
+   - **Returns & Frequency**:
+     - Displays Expected ROI, Distribution Frequency, and Total Cost Authorized for standard debt/sukuk contracts.
+     - **SPV Equity Rule**: Suppressed entirely when `sharia_contract_type === 'spv_equity'` (no fixed returns or coupon distributions apply to equity structures). When suppressed, the Financial Terms grid adapts seamlessly to a 2-column balanced layout.
+3. **Roadmap & Milestones**: Verified platform and issuer milestones in UTC.
+4. **Document Vault**: Pitch deck, financials, valuation report, cap table.
+5. **Media Gallery**: Supplementary campaign visuals.
+6. **SPV & Legal Entity Details**:
+   - Renders SPV Legal Name and Registration Authority (e.g., ADGM, DIFC).
+   - **Privacy Rule**: The internal SPV registration number is suppressed on the public/investor-facing project page.
+7. **Conversion Terms Card**: Dedicated summary of trigger share price, ratio, cutoff deadline, and class value cap.
 
 ---
 
@@ -344,60 +364,33 @@ The Individual Project page presents deep due-diligence data and the interactive
 
 The right-hand column on the project page contains the live pledging widget.
 
-### 6.1 Live Funding Headroom & Percentage
-- **Raised Amount**: Sum of all active pledges for this project (`SUM(pledged_amount)`).
-- **Target Goal**: `projects.target_goal`.
-- **Hard Cap**: `projects.hard_cap`.
-- **Funding Percentage**: `(total_pledged / target_goal) * 100` rounded to 1 decimal place (`.toFixed(1)`).
-
-### 6.2 Single-Pledge Restriction Check
-Before allowing the investor to input an amount, the system executes:
-```javascript
-const { eligible, reason, existingPledge } = await checkInvestEligibility(projectId, investor.id);
-```
-- If `existingPledge` is found (`pledges` table has a record with matching `project_id` and `investor_id`):
-  - The pledge form is **disabled**.
-  - An inline alert card is displayed:
-    > **Already Pledged**
-    > You have already placed a pledge of **AED {existingPledge.pledged_amount}** ({existingPledge.pledged_units} units) on this project. Investors are allowed a maximum of one pledge per project.
-
-### 6.3 Real-Time Pledge Calculator
-When eligible to pledge:
-1. **Pledge Amount Input**:
-   - Validated against `min_investment_floor` (e.g. >= 1,000 AED).
-   - Validated against Investor Class Ceiling (from `class-rules.md`, e.g. Class 4 max pledge is AED 1,000,000).
-   - Validated against Hard Cap headroom (`hard_cap - total_pledged`).
-2. **Pledged Units Calculation**:
-   $$\text{pledged\_units} = \left\lfloor \frac{\text{pledged\_amount}}{\text{unit\_price}} \right\rfloor$$
-3. **Fee Calculation**:
-   - `fee_percent` looked up from `class-rules.md` (e.g. Class 4 fee = 0.8%).
-   $$\text{fee\_amount} = \text{pledged\_amount} \times \left( \frac{\text{fee\_percent}}{100} \right)$$
-4. **Total Debit Calculation**:
-   $$\text{total\_debit} = \text{pledged\_amount} + \text{fee\_amount}$$
-5. **Wallet Balance Check**:
-   - If `total_debit > wallet_balance`, submit button displays "Insufficient Wallet Balance" with top-up link.
-
-### 6.4 Pledge Execution Workflow
-Upon clicking **"Confirm & Place Pledge"**:
-1. Server action `createPledge(projectId, pledgeAmount)` executes inside [app/actions/pledge.js](file:///Users/marchakimmwai/Desktop/unoffical-projects/crowd-funding-platform-prototype/app/actions/pledge.js).
-2. Server verifies session, investor record, active pledge status, class limits, and wallet balance.
-3. Server debits investor wallet:
-   $$\text{new\_wallet\_balance} = \text{wallet\_balance} - (\text{pledged\_amount} + \text{fee\_amount})$$
-4. Server inserts new row into `pledges` table with frozen snapshots:
-   - `pledged_amount`: `pledgeAmount`
-   - `investor_class_at_pledge`: `investor.investor_class`
-   - `fee_percent_at_pledge`: `feePercent`
-   - `fee_amount`: `feeAmount`
-   - `pledged_units`: `pledgedUnits`
-   - `status`: `'pending'`
-   - `payment_status`: `'completed'`
-   - `pledged_at`: `new Date().toISOString()` (UTC)
-5. **Holdings Table Exclusion**: No row is created in `holdings` table at pledge time. Holdings are created later upon campaign completion.
-6. Server revalidates path and returns success response.
+### 6.1 Oversubscription Ceiling & Eligibility
+- **Oversubscription Ceiling**: Total pending pledges are permitted up to **150% of capacity** (`MAX_OVERSUBSCRIPTION_PERCENT = 150`, where capacity is `hard_cap || target_goal`). Pledges attempting to exceed 150% are rejected.
+- **Single-Pledge Restriction Check**: Checked dynamically (`status NOT IN ('cancelled', 'refunded', 'rejected_oversubscribed')`).
+- **Pledge Request Modal**:
+  - Titled **"Pledge request"**.
+  - Displays investor wallet balance, floor, and class cap.
+  - **Live Pre-Confirmation Cost Breakdown**: Displays real-time breakdown of Pledge Principal, Pledge Charge / Investor Fee (by investor class percentage), and Total Amount (total debited from wallet) before the user clicks to submit the pledge.
+  - Computes estimated units and maximum eligible conversion units.
+  - **Sukuk-to-Equity Conversion Controls (Classes 1–4)**: Displays the maximum eligible conversion units and provides interactive reduction controls (numeric input, `0 (Opt Out)` and `Max` buttons) so investors can reduce their requested conversion units if they prefer to retain standard Sukuk without converting to shares.
+  - Presents **"How your pledge works"** disclosure panel (`PLEDGE_DISCLOSURES`).
+  - Contains mandatory terms acceptance checkbox: *"I've read and accept the subscription terms for this pledge"*.
+  - Confirm button: **"Submit pledge"** (disabled until terms accepted and balance verified).
+  - Captures `signed_at` and `signed_ip` audit metadata.
+  - Inserts `pledge_docs` record (`doc_type: 'subscription_agreement'`).
+  - Dispatches fire-and-forget Make webhook payload for background legal PDF generation and emailing.
 
 ---
 
-## 7. Conversion Entitlements Summary
+## 7. Row-Level Security (RLS) Architecture
+
+Client access to pledges and documents is protected via Postgres Row-Level Security:
+- **SELECT-Only Policies**: Authenticated investors may only query their own pledges and pledge documents (`investors.user_id = auth.jwt()->>'sub'` or `investors.org_id = auth.jwt()->>'org_id'`). Issuers may only select pledges and documents for projects they own.
+- **Mutations Blocked**: INSERT, UPDATE, and DELETE permissions are revoked from `anon` and `authenticated` roles. All pledge creations, status transitions, and document records are executed strictly server-side via `supabaseAdmin` using `SUPABASE_SERVICE_KEY`.
+- **Clerk JWT Org Mapping**: Requires `"org_id": "{{org.id}}"` mapped in Clerk Dashboard Supabase JWT template for organization-scoped lookups.
+---
+
+## 8. Conversion Entitlements Summary
 
 Conversion rights display dynamically on the project page based on `class-rules.md`:
 
@@ -412,11 +405,16 @@ Conversion rights display dynamically on the project page based on `class-rules.
 
 ---
 
-## 8. Summary Checklist for Developers & Auditors
+## 9. Summary Checklist for Developers & Auditors
 
-- [x] All funding progress values query `pledges` table (`status != 'cancelled'`).
-- [x] Funding progress % formatted to 1 decimal place (`.toFixed(1)`).
-- [x] `campaign_end_date` rendered in UTC format (`DD MMM YYYY, HH:mm UTC`).
+- [x] All funding progress queries filter out `cancelled`, `refunded`, and `rejected_oversubscribed` pledges.
+- [x] Subscription progress % displayed unconstrained (e.g. `130% Subscribed`), visual bars clamped to 100%.
+- [x] "Oversubscribed" badge rendered when `rawPercent > 100%`.
+- [x] Class Band Subscription Bar renders segmented bands with priority color grading and viewer band callout.
+- [x] Conversion Demand Bar reflects requested demand and coarse "Low demand" state for < 3 pledges.
 - [x] Single-pledge rule enforced server-side and client-side per project per investor.
-- [x] No `holdings` table row created at pledge time.
-- [x] Frozen snapshot fields saved on `pledges` row.
+- [x] Oversubscription ceiling enforced at `150%` of capacity (`MAX_OVERSUBSCRIPTION_PERCENT = 150`).
+- [x] Mandatory terms acceptance checkbox required at pledge time (`acceptedTerms === true`).
+- [x] Audit metadata (`signed_at`, `signed_ip`, `terms_version`) captured and written to `pledge_docs`.
+- [x] Asynchronous Make webhook dispatched for subscription agreement generation.
+- [x] RLS SELECT-only policies configured on `pledges` and `pledge_docs`.

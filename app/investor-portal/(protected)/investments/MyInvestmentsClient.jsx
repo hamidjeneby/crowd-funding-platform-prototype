@@ -35,6 +35,49 @@ function formatUtcDate(dateString) {
   }
 }
 
+function getPledgeStatusBadge(status, pledge = null) {
+  switch (status) {
+    case "pending":
+      return {
+        label: "Pending allocation",
+        className: "bg-amber-100 text-amber-900 border-amber-300",
+      };
+    case "allocated": {
+      const isPartial =
+        pledge &&
+        pledge.allocated_amount != null &&
+        pledge.pledged_amount != null &&
+        Number(pledge.allocated_amount) < Number(pledge.pledged_amount);
+      return {
+        label: isPartial ? "Partially allocated" : "Allocated",
+        className: isPartial
+          ? "bg-teal-100 text-teal-900 border-teal-300"
+          : "bg-emerald-100 text-emerald-900 border-emerald-300",
+      };
+    }
+    case "rejected_oversubscribed":
+      return {
+        label: "Not allocated",
+        className: "bg-gray-100 text-gray-700 border-gray-300",
+      };
+    case "refunded":
+      return {
+        label: "Refunded",
+        className: "bg-rose-50 text-rose-800 border-rose-300",
+      };
+    case "cancelled":
+      return {
+        label: "Cancelled",
+        className: "bg-gray-100 text-gray-600 border-gray-300",
+      };
+    default:
+      return {
+        label: status || "Pledged",
+        className: "bg-emerald-100 text-emerald-900 border-emerald-300",
+      };
+  }
+}
+
 export default function MyInvestmentsClient({ investorClass, holdings = [], pledges = [] }) {
   const [activeTab, setActiveTab] = useState(pledges.length > 0 ? "pledges" : holdings.length > 0 ? "holdings" : "pledges");
 
@@ -144,7 +187,7 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
               <div className="space-y-2">
                 <h3 className="text-xl font-bold text-[#064e3b]">No Active Pledges</h3>
                 <p className="text-xs text-[#064e3b]/70 leading-relaxed">
-                  You haven't submitted any project pledges yet. Browse open projects on the marketplace to pledge funds.
+                  You haven&apos;t submitted any project pledges yet. Browse open projects on the marketplace to pledge funds.
                 </p>
               </div>
               <Link
@@ -197,9 +240,19 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                       </div>
 
                       <div className="flex items-center gap-2 self-start sm:self-auto">
-                        <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 font-bold text-xs uppercase tracking-wider border border-emerald-200">
-                          {pledge.status || "Pledged"}
-                        </span>
+                        {pledge.allocation_rank != null && (
+                          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-bold text-xs border border-slate-200">
+                            Rank #{pledge.allocation_rank}
+                          </span>
+                        )}
+                        {(() => {
+                          const badge = getPledgeStatusBadge(pledge.status, pledge);
+                          return (
+                            <span className={`px-3 py-1 rounded-full font-bold text-xs uppercase tracking-wider border ${badge.className}`}>
+                              {badge.label}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
 
@@ -221,9 +274,11 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                       </div>
 
                       <div>
-                        <div className="text-gray-500 font-medium">Conversion Eligible Units</div>
+                        <div className="text-gray-500 font-medium">
+                          {pledge.status === "pending" ? "Requested Conversion Units" : "Conversion Eligible Units"}
+                        </div>
                         <div className="text-base font-extrabold text-emerald-800 mt-0.5">
-                          {pledge.conversion_eligible_units != null ? Number(pledge.conversion_eligible_units).toLocaleString() : "0"}{" "}
+                          {Number(pledge.conversion_eligible_units ?? pledge.requested_conversion_units ?? 0).toLocaleString()}{" "}
                           <span className="text-xs font-normal text-gray-500">units</span>
                         </div>
                       </div>
@@ -236,9 +291,13 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                       </div>
 
                       <div>
-                        <div className="text-gray-500 font-medium">Total Cost Debited</div>
+                        <div className="text-gray-500 font-medium">
+                          {Number(pledge.refunded_amount) > 0 ? "Refunded to Wallet" : "Total Cost Debited"}
+                        </div>
                         <div className="text-base font-extrabold text-emerald-800 mt-0.5">
-                          {currency} {(amount + fee).toLocaleString()}
+                          {Number(pledge.refunded_amount) > 0
+                            ? `${currency} ${Number(pledge.refunded_amount).toLocaleString()}`
+                            : `${currency} ${(amount + fee).toLocaleString()}`}
                         </div>
                       </div>
                     </div>
@@ -377,9 +436,19 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                       </div>
 
                       <div className="flex items-center gap-2 self-start sm:self-auto">
-                        <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 font-bold text-xs uppercase tracking-wider border border-emerald-200">
-                          {holding.status || "Allocated"}
-                        </span>
+                        {holding.allocation_rank != null && (
+                          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-bold text-xs border border-slate-200">
+                            Rank #{holding.allocation_rank}
+                          </span>
+                        )}
+                        {(() => {
+                          const badge = getPledgeStatusBadge(holding.status, holding);
+                          return (
+                            <span className={`px-3 py-1 rounded-full font-bold text-xs uppercase tracking-wider border ${badge.className}`}>
+                              {badge.label}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
 
@@ -389,21 +458,40 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                         <div className="text-base font-extrabold text-[#064e3b] mt-0.5">
                           {currency} {amount.toLocaleString()}
                         </div>
+                        {Number(holding.refunded_amount) > 0 && (
+                          <div className="text-[11px] text-teal-800 font-semibold mt-0.5">
+                            Refunded: {currency} {Number(holding.refunded_amount).toLocaleString()}
+                          </div>
+                        )}
                       </div>
 
                       <div>
                         <div className="text-gray-500 font-medium">Units Held</div>
                         <div className="text-base font-extrabold text-[#064e3b] mt-0.5">
-                          {holding.pledged_units ? holding.pledged_units.toLocaleString() : "—"}{" "}
+                          {(holding.allocated_units ?? holding.pledged_units) != null
+                            ? Number(holding.allocated_units ?? holding.pledged_units).toLocaleString()
+                            : "—"}{" "}
                           <span className="text-xs font-normal text-gray-500 capitalize">{project.unit_type || "units"}</span>
                         </div>
                       </div>
 
                       <div>
-                        <div className="text-gray-500 font-medium">Conversion Eligible Units</div>
+                        <div className="text-gray-500 font-medium">
+                          {holding.ownership_percentage != null
+                            ? "Ownership Stake"
+                            : "Conversion Eligible Units"}
+                        </div>
                         <div className="text-base font-extrabold text-emerald-800 mt-0.5">
-                          {holding.conversion_eligible_units ? Number(holding.conversion_eligible_units).toLocaleString() : "0"}{" "}
-                          <span className="text-xs font-normal text-gray-500">units</span>
+                          {holding.ownership_percentage != null ? (
+                            <>{Number(Number(holding.ownership_percentage).toFixed(4))}%</>
+                          ) : (
+                            <>
+                              {holding.conversion_eligible_units
+                                ? Number(holding.conversion_eligible_units).toLocaleString()
+                                : "0"}{" "}
+                              <span className="text-xs font-normal text-gray-500">units</span>
+                            </>
+                          )}
                         </div>
                       </div>
 
@@ -473,7 +561,7 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                                   Your Conversion Outcome Upon Trigger
                                 </span>
                                 <span className="text-xs text-[#064e3b]/80">
-                                  Converting <strong>{Number(holding.conversion_eligible_units || 0).toLocaleString()} Sukuk units</strong> out of {Number(holding.pledged_units || 0).toLocaleString()} held units
+                                  Converting <strong>{Number(holding.conversion_eligible_units || 0).toLocaleString()} Sukuk units</strong> out of {Number(holding.allocated_units ?? holding.pledged_units ?? 0).toLocaleString()} held units
                                 </span>
                               </div>
                               <div className="text-right shrink-0">

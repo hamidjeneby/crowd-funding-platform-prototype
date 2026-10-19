@@ -14,7 +14,10 @@ import {
   CheckCircle2,
   Building2,
   FileText,
+  AlertCircle,
+  Loader2,
 } from "lucide-react";
+import { createSupportTicket } from "@/app/actions/tickets";
 
 export default function IssuerSupportPage() {
   // FAQ Accordion State
@@ -28,17 +31,20 @@ export default function IssuerSupportPage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [ticketSuccessMsg, setTicketSuccessMsg] = useState("");
+  const [ticketError, setTicketError] = useState("");
 
   const faqs = [
     {
       id: 1,
-      question: "How long does platform auditor review take for new project submissions?",
+      question:
+        "How long does platform auditor review take for new project submissions?",
       answer:
         "Auditor review typically takes 2 to 3 business days once all required KYB documents, balance sheets, valuation reports, and cap tables are uploaded. Any document rejections or changes requested will appear directly on your Issuer Dashboard and Project Management Documents tab.",
     },
     {
       id: 2,
-      question: "When are escrow funds released to our settlement bank account?",
+      question:
+        "When are escrow funds released to our settlement bank account?",
       answer:
         "Escrow release occurs following campaign goal completion and verification of system or issuer-defined milestones as specified in your campaign charter. Released funds are transferred directly to your verified corporate bank account.",
     },
@@ -50,7 +56,8 @@ export default function IssuerSupportPage() {
     },
     {
       id: 4,
-      question: "What happens if we update our corporate bank account or registered address?",
+      question:
+        "What happens if we update our corporate bank account or registered address?",
       answer:
         "Modifying corporate KYB address, representative details, or settlement bank information automatically sets your verification status to Pending. Compliance will re-verify the account before new disbursements occur.",
     },
@@ -62,19 +69,37 @@ export default function IssuerSupportPage() {
     },
   ];
 
-  const handleTicketSubmit = (e) => {
+  const handleTicketSubmit = async (e) => {
     e.preventDefault();
     if (!ticketForm.subject.trim() || !ticketForm.message.trim()) return;
 
     setIsSubmitting(true);
-    setTimeout(() => {
+    setTicketError("");
+    setTicketSuccessMsg("");
+
+    try {
+      const res = await createSupportTicket({
+        category: ticketForm.category,
+        subject: ticketForm.subject,
+        message: ticketForm.message,
+        userType: "issuer",
+      });
+
+      if (res.success) {
+        setTicketSuccessMsg(
+          `Issuer support ticket #${res.ticket.id} submitted successfully! Our issuer operations desk will review and respond shortly.`
+        );
+        setTicketForm({ subject: "", category: "general", message: "" });
+        setTimeout(() => setTicketSuccessMsg(""), 8000);
+      } else {
+        setTicketError(res.error || "Failed to submit ticket. Please try again.");
+      }
+    } catch (err) {
+      console.error("Error submitting issuer ticket:", err);
+      setTicketError("An unexpected error occurred while submitting your ticket.");
+    } finally {
       setIsSubmitting(false);
-      setTicketSuccessMsg(
-        `Issuer support ticket #${Math.floor(100000 + Math.random() * 900000)} submitted successfully! Our issuer operations desk will respond within 24 hours.`
-      );
-      setTicketForm({ subject: "", category: "general", message: "" });
-      setTimeout(() => setTicketSuccessMsg(""), 6000);
-    }, 800);
+    }
   };
 
   return (
@@ -88,7 +113,8 @@ export default function IssuerSupportPage() {
           Support & Assistance
         </h1>
         <p className="text-sm text-[#064e3b]/70 mt-0.5">
-          Submit support tickets, contact compliance directly, or search our issuer knowledgebase.
+          Submit support tickets, contact compliance directly, or search our
+          issuer knowledgebase.
         </p>
       </div>
 
@@ -102,8 +128,12 @@ export default function IssuerSupportPage() {
             <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
               Issuer Operations Email
             </span>
-            <div className="font-bold text-[#064e3b] text-sm">issuer.ops@crowdfund.platform</div>
-            <div className="text-[11px] text-gray-500">24-hour response SLA</div>
+            <div className="font-bold text-[#064e3b] text-sm">
+              issuer.ops@crowdfund.platform
+            </div>
+            <div className="text-[11px] text-gray-500">
+              24-hour response SLA
+            </div>
           </div>
         </div>
 
@@ -115,8 +145,12 @@ export default function IssuerSupportPage() {
             <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
               Issuer Relations Hotline
             </span>
-            <div className="font-bold text-[#064e3b] text-sm">+1 (800) 555-ISSUER</div>
-            <div className="text-[11px] text-gray-500">Mon-Fri 8:00 AM - 6:00 PM EST</div>
+            <div className="font-bold text-[#064e3b] text-sm">
+              +1 (800) 555-ISSUER
+            </div>
+            <div className="text-[11px] text-gray-500">
+              Mon-Fri 8:00 AM - 6:00 PM EST
+            </div>
           </div>
         </div>
 
@@ -128,8 +162,12 @@ export default function IssuerSupportPage() {
             <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
               Escrow & Audit Desk
             </span>
-            <div className="font-bold text-[#064e3b] text-sm">compliance@crowdfund.platform</div>
-            <div className="text-[11px] text-gray-500">Same-day priority review</div>
+            <div className="font-bold text-[#064e3b] text-sm">
+              compliance@crowdfund.platform
+            </div>
+            <div className="text-[11px] text-gray-500">
+              Same-day priority review
+            </div>
           </div>
         </div>
       </div>
@@ -150,6 +188,13 @@ export default function IssuerSupportPage() {
             </div>
           )}
 
+          {ticketError && (
+            <div className="p-4 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-semibold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <span>{ticketError}</span>
+            </div>
+          )}
+
           <form onSubmit={handleTicketSubmit} className="space-y-4 text-xs">
             <div>
               <label className="block font-bold text-[#064e3b] uppercase mb-1">
@@ -157,14 +202,19 @@ export default function IssuerSupportPage() {
               </label>
               <select
                 value={ticketForm.category}
-                onChange={(e) => setTicketForm({ ...ticketForm, category: e.target.value })}
+                onChange={(e) =>
+                  setTicketForm({ ...ticketForm, category: e.target.value })
+                }
                 className="w-full px-3.5 py-2.5 rounded-xl bg-[#fcfaf7] border border-[#059669]/30 text-[#064e3b] font-medium focus:outline-none focus:ring-2 focus:ring-[#059669]"
               >
                 <option value="general">General Issuer Inquiry</option>
                 <option value="audit">Project Audit & Submission Review</option>
                 <option value="banking">Settlement Bank & Verification</option>
                 <option value="escrow">Escrow Milestone & Disbursement</option>
-                <option value="distributions">Profit Reporting & Distributions</option>
+                <option value="distributions">
+                  Profit Reporting & Distributions
+                </option>
+                <option value="other">Other</option>
               </select>
             </div>
 
@@ -177,7 +227,9 @@ export default function IssuerSupportPage() {
                 required
                 placeholder="e.g. Milestone 2 Verification for Solar Project"
                 value={ticketForm.subject}
-                onChange={(e) => setTicketForm({ ...ticketForm, subject: e.target.value })}
+                onChange={(e) =>
+                  setTicketForm({ ...ticketForm, subject: e.target.value })
+                }
                 className="w-full px-3.5 py-2.5 rounded-xl bg-[#fcfaf7] border border-[#059669]/30 text-[#064e3b] font-medium focus:outline-none focus:ring-2 focus:ring-[#059669]"
               />
             </div>
@@ -191,7 +243,9 @@ export default function IssuerSupportPage() {
                 required
                 placeholder="Explain what you need assistance with..."
                 value={ticketForm.message}
-                onChange={(e) => setTicketForm({ ...ticketForm, message: e.target.value })}
+                onChange={(e) =>
+                  setTicketForm({ ...ticketForm, message: e.target.value })
+                }
                 className="w-full p-3.5 rounded-xl bg-[#fcfaf7] border border-[#059669]/30 text-[#064e3b] font-medium focus:outline-none focus:ring-2 focus:ring-[#059669]"
               />
             </div>
@@ -201,7 +255,15 @@ export default function IssuerSupportPage() {
               disabled={isSubmitting}
               className="w-full py-3 rounded-xl bg-[#064e3b] text-white font-bold hover:bg-[#047857] transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              <Send className="w-4 h-4" /> Submit Ticket
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Submitting Ticket...
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4" /> Submit Ticket
+                </>
+              )}
             </button>
           </form>
         </div>

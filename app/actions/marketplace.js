@@ -2,7 +2,7 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { CLASS_CONFIG } from "@/app/constants/classConfig";
+import { CLASS_CONFIG, MAX_OVERSUBSCRIPTION_PERCENT } from "@/app/constants/classConfig";
 import { ensureSystemMilestonesExist } from "./projects";
 
 function checkProjectVisibilityInternal(project, investorClassRaw) {
@@ -30,12 +30,17 @@ function checkProjectVisibilityInternal(project, investorClassRaw) {
     }
   }
 
-  // 3. Minimum Target Goal threshold per class (Classes 5-8)
+  // 3. Minimum Target Goal threshold per class (Classes 5-10)
   if (cfg.minTargetGoal > 0) {
     const goal = Number(project.target_goal) || 0;
     if (goal <= cfg.minTargetGoal) {
       return false;
     }
+  }
+
+  // 4. SPV Equity Rule: Projects structured with SPV Equity are not eligible for investors below Class 4 (Classes 5-10)
+  if (project.sharia_contract_type === "spv_equity" && classNum > 4) {
+    return false;
   }
 
   return true;
@@ -56,7 +61,8 @@ export async function isProjectVisibleToClass(project, investorClassRaw) {
 }
 
 /**
- * Live computes raised amounts for project IDs directly from pledges table
+ * Live computes raised/subscribed amounts for project IDs directly from pledges table.
+ * Excludes cancelled, refunded, and rejected_oversubscribed.
  */
 export async function getLiveRaisedAmounts(projectIds) {
   if (!projectIds || projectIds.length === 0) return {};
@@ -73,7 +79,8 @@ export async function getLiveRaisedAmounts(projectIds) {
 
   const totals = {};
   data.forEach((p) => {
-    if (p.status !== "cancelled" && p.status !== "refunded") {
+    const s = (p.status || "").toLowerCase();
+    if (s !== "cancelled" && s !== "refunded" && s !== "rejected_oversubscribed") {
       const pid = p.project_id;
       const amt = Number(p.pledged_amount) || 0;
       totals[pid] = (totals[pid] || 0) + amt;
@@ -84,14 +91,16 @@ export async function getLiveRaisedAmounts(projectIds) {
 }
 
 /**
- * Live computes total conversion_eligible_units for project IDs directly from pledges table
+ * Live computes total conversion demand for project IDs directly from pledges table.
+ * Prioritizes conversion_eligible_units (post-allocation) or falls back to requested_conversion_units.
+ * Excludes cancelled, refunded, and rejected_oversubscribed.
  */
 export async function getLiveConversionTotals(projectIds) {
   if (!projectIds || projectIds.length === 0) return {};
 
   const { data, error } = await supabaseAdmin
     .from("pledges")
-    .select("project_id, conversion_eligible_units, status")
+    .select("project_id, conversion_eligible_units, requested_conversion_units, status")
     .in("project_id", projectIds);
 
   if (error || !data) {
@@ -101,9 +110,13 @@ export async function getLiveConversionTotals(projectIds) {
 
   const totals = {};
   data.forEach((p) => {
-    if (p.status !== "cancelled" && p.status !== "refunded") {
+    const s = (p.status || "").toLowerCase();
+    if (s !== "cancelled" && s !== "refunded" && s !== "rejected_oversubscribed") {
       const pid = p.project_id;
-      const units = Number(p.conversion_eligible_units) || 0;
+      const units =
+        p.conversion_eligible_units != null
+          ? Number(p.conversion_eligible_units)
+          : Number(p.requested_conversion_units || 0);
       totals[pid] = (totals[pid] || 0) + units;
     }
   });
@@ -386,9 +399,40 @@ export async function getInvestorFacingProjectData(slugOrId) {
 }
 
 /**
- * Server-side lookup for project detail by slug with strict class eligibility verification
+ * Helper to resolve current investor internal ID from Clerk session
  */
-export async function getProjectDetailBySlug(slug, investorClassRaw) {
+async function resolveViewerInvestorId(explicitInvestorId) {
+  if (explicitInvestorId) return explicitInvestorId;
+  try {
+    const { userId, orgId } = await auth();
+    if (!userId) return null;
+
+    if (orgId) {
+      const { data } = await supabaseAdmin
+        .from("investors")
+        .select("id")
+        .eq("org_id", orgId)
+        .maybeSingle();
+      if (data?.id) return data.id;
+    }
+
+    const { data } = await supabaseAdmin
+      .from("investors")
+      .select("id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    return data?.id || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Server-side lookup for project detail by slug with strict class eligibility verification.
+ * Also allows an investor who has a non-cancelled pledge on a closed project
+ * ('closing', 'funded', 'failed', 'completed') to view the project page.
+ */
+export async function getProjectDetailBySlug(slug, investorClassRaw, investorId = null) {
   if (!slug) return null;
 
   const classNum =
@@ -399,7 +443,7 @@ export async function getProjectDetailBySlug(slug, investorClassRaw) {
   // 1. Fetch project row for visibility verification
   const { data: project, error: pError } = await supabaseAdmin
     .from("projects")
-    .select("id, status, min_eligible_investor_class, target_goal")
+    .select("id, status, min_eligible_investor_class, target_goal, sharia_contract_type")
     .eq("slug", slug)
     .maybeSingle();
 
@@ -407,9 +451,31 @@ export async function getProjectDetailBySlug(slug, investorClassRaw) {
     return null;
   }
 
-  // 2. Verify visibility
-  if (!checkProjectVisibilityInternal(project, classNum)) {
-    return null;
+  // 2. Verify visibility (or allow investor with a non-cancelled pledge after close)
+  const isStandardVisible = checkProjectVisibilityInternal(project, classNum);
+  if (!isStandardVisible) {
+    const isClosedStatus = ["closing", "funded", "failed", "completed"].includes(project.status);
+    if (!isClosedStatus) {
+      return null;
+    }
+
+    const resolvedInvestorId = await resolveViewerInvestorId(investorId);
+    if (!resolvedInvestorId) {
+      return null;
+    }
+
+    const { data: nonCancelledPledge } = await supabaseAdmin
+      .from("pledges")
+      .select("id")
+      .eq("project_id", project.id)
+      .eq("investor_id", resolvedInvestorId)
+      .neq("status", "cancelled")
+      .limit(1)
+      .maybeSingle();
+
+    if (!nonCancelledPledge) {
+      return null;
+    }
   }
 
   // 3. Fetch shared investor-facing project data
@@ -435,7 +501,26 @@ export async function checkInvestEligibility(project, investorClassRaw, investor
     };
   }
 
-  // 2. Class Max Pledge Check vs Min Floor
+  // 1b. Deadline Check: block pledges when now() >= campaign_end_date
+  if (project.campaign_end_date) {
+    const deadlineMs = new Date(project.campaign_end_date).getTime();
+    if (!isNaN(deadlineMs) && Date.now() >= deadlineMs) {
+      return {
+        eligible: false,
+        reason: "The campaign deadline has passed and this campaign is no longer accepting pledges.",
+      };
+    }
+  }
+
+  // 2. SPV Equity Contract Check (Classes 1-4 only)
+  if (project.sharia_contract_type === "spv_equity" && classNum > 4) {
+    return {
+      eligible: false,
+      reason: "Projects structured with SPV Equity are restricted to Class 1 to Class 4 investors only.",
+    };
+  }
+
+  // 3. Class Max Pledge Check vs Min Floor
   const floor = Number(project.min_investment_floor) || 0;
   if (floor > cfg.maxPledge) {
     return {
@@ -451,7 +536,7 @@ export async function checkInvestEligibility(project, investorClassRaw, investor
       .select("id")
       .eq("investor_id", investorId)
       .eq("project_id", project.id)
-      .not("status", "in", '("cancelled","refunded")')
+      .not("status", "in", '("cancelled","refunded","rejected_oversubscribed")')
       .maybeSingle();
 
     if (existingPledge) {
@@ -468,7 +553,7 @@ export async function checkInvestEligibility(project, investorClassRaw, investor
       .from("pledges")
       .select("id")
       .eq("investor_id", investorId)
-      .not("status", "in", '("cancelled","refunded")');
+      .not("status", "in", '("cancelled","refunded","rejected_oversubscribed")');
 
     const activeCount = activePledges ? activePledges.length : 0;
     if (activeCount >= cfg.maxActivePledges) {
@@ -479,6 +564,243 @@ export async function checkInvestEligibility(project, investorClassRaw, investor
     }
   }
 
+  // 5. Oversubscription Ceiling Check (150% of capacity)
+  const capacity = Number(project.hard_cap) || Number(project.target_goal) || 0;
+  const currentLiveSubscribed = Number(project.live_raised_amount) || 0;
+  if (capacity > 0 && currentLiveSubscribed >= capacity * (MAX_OVERSUBSCRIPTION_PERCENT / 100)) {
+    return {
+      eligible: false,
+      reason: "This campaign has reached its maximum subscription level.",
+    };
+  }
+
   return { eligible: true, reason: null };
+}
+
+/**
+ * Server-side function (service key, after visibility check) that groups counted
+ * pledges by investor_class_at_pledge and returns ONLY bucketed percentages.
+ * Never returns amounts, counts, or individual pledge rows.
+ */
+export async function getProjectClassBandSubscription(slug, viewerClassNum) {
+  const project = await getProjectDetailBySlug(slug, viewerClassNum);
+  if (!project) return null;
+
+  const capacity = Number(project.target_goal) || 0;
+  const softCap = Number(project.soft_cap) || 0;
+  const softCapPercent = capacity > 0 ? (softCap / capacity) * 100 : 0;
+
+  // Fetch counted pledges
+  const { data: pledgesData } = await supabaseAdmin
+    .from("pledges")
+    .select("investor_class_at_pledge, pledged_amount, status")
+    .eq("project_id", project.id);
+
+  const countedPledges = (pledgesData || []).filter(
+    (p) => !["cancelled", "refunded", "rejected_oversubscribed"].includes((p.status || "").toLowerCase())
+  );
+
+  const isSpvEquity =
+    String(project.sharia_contract_type || project.shariah_contract_type || "")
+      .toLowerCase()
+      .trim() === "spv_equity";
+
+  const bands = [];
+
+  if (isSpvEquity) {
+    // For SPV equity projects, eligible investors are strictly Class 1 to Class 4.
+    // Separate into two distinct bands:
+    // 1) Class 1–2 (Class 1 and 2)
+    // 2) Class 3–4 (Class 3 and 4)
+    // No minimum 3-pledge privacy merge is applied: even a single pledge appears in its respective band.
+    const spvTier1 = { id: "1-2", label: "Class 1–2", minClass: 1, maxClass: 2, count: 0, amount: 0 };
+    const spvTier2 = { id: "3-4", label: "Class 3–4", minClass: 3, maxClass: 4, count: 0, amount: 0 };
+
+    countedPledges.forEach((p) => {
+      const cls = Number(p.investor_class_at_pledge) || 10;
+      const amt = Number(p.pledged_amount) || 0;
+      if (cls <= 2) {
+        spvTier1.count += 1;
+        spvTier1.amount += amt;
+      } else {
+        spvTier2.count += 1;
+        spvTier2.amount += amt;
+      }
+    });
+
+    if (spvTier1.count > 0) {
+      bands.push(spvTier1);
+    }
+    if (spvTier2.count > 0) {
+      bands.push(spvTier2);
+    }
+  } else {
+    // Base bands definition in priority order for standard multi-tier contracts
+    const rawTier1 = { id: "1", label: "Class 1", minClass: 1, maxClass: 1, count: 0, amount: 0 };
+    const rawTier2 = { id: "2-4", label: "Class 2–4", minClass: 2, maxClass: 4, count: 0, amount: 0 };
+    const rawTier3 = { id: "5-7", label: "Class 5–7", minClass: 5, maxClass: 7, count: 0, amount: 0 };
+    const rawTier4 = { id: "8-10", label: "Class 8–10", minClass: 8, maxClass: 10, count: 0, amount: 0 };
+
+    countedPledges.forEach((p) => {
+      const cls = Number(p.investor_class_at_pledge) || 10;
+      const amt = Number(p.pledged_amount) || 0;
+      if (cls === 1) {
+        rawTier1.count += 1;
+        rawTier1.amount += amt;
+      } else if (cls >= 2 && cls <= 4) {
+        rawTier2.count += 1;
+        rawTier2.amount += amt;
+      } else if (cls >= 5 && cls <= 7) {
+        rawTier3.count += 1;
+        rawTier3.amount += amt;
+      } else {
+        rawTier4.count += 1;
+        rawTier4.amount += amt;
+      }
+    });
+
+    // Privacy merging rule applies ONLY for high-class tiers (Tier 1 & Tier 2: Class 1–4 maximum):
+    // - If both Tier 1 and Tier 2 have >= 3 pledges, they remain separate as "Class 1" and "Class 2–4".
+    // - If either has pledges and fewer than 3, they merge into "Class 1–4" to preserve investor privacy.
+    // - Merging NEVER extends past Class 4 into Class 5–7 or Class 8–10.
+    const totalHighClassCount = rawTier1.count + rawTier2.count;
+    if (totalHighClassCount > 0) {
+      if (rawTier1.count >= 3 && rawTier2.count >= 3) {
+        bands.push(rawTier1);
+        bands.push(rawTier2);
+      } else if (rawTier1.count > 0 && (rawTier1.count < 3 || rawTier2.count > 0)) {
+        bands.push({
+          id: "1-4",
+          label: "Class 1–4",
+          minClass: 1,
+          maxClass: 4,
+          count: totalHighClassCount,
+          amount: rawTier1.amount + rawTier2.amount,
+        });
+      } else if (rawTier1.count >= 3 && rawTier2.count === 0) {
+        bands.push(rawTier1);
+      } else {
+        bands.push(rawTier2);
+      }
+    }
+
+    // Tier 3 (Class 5–7) and Tier 4 (Class 8–10) NEVER merge:
+    // Even if a tier has only 1 pledge, it remains distinct in its tier.
+    if (rawTier3.count > 0) {
+      bands.push(rawTier3);
+    }
+    if (rawTier4.count > 0) {
+      bands.push(rawTier4);
+    }
+  }
+
+  // Compute bucketed percentages
+  let cumulative = 0;
+  let viewerCumulativePercent = 0;
+  let foundViewerBand = false;
+
+  const finalBands = bands.map((band) => {
+    const pct = capacity > 0 ? (band.amount / capacity) * 100 : 0;
+    cumulative += pct;
+    const isViewerBand = viewerClassNum >= band.minClass && viewerClassNum <= band.maxClass;
+    if (isViewerBand) {
+      viewerCumulativePercent = cumulative;
+      foundViewerBand = true;
+    }
+    return {
+      label: band.label,
+      amount: band.amount,
+      percent: Math.round(pct * 10) / 10,
+      cumulativePercent: Math.round(cumulative * 10) / 10,
+      isViewerBand,
+    };
+  });
+
+  const totalSubscribed = countedPledges.reduce((sum, p) => sum + Number(p.pledged_amount || 0), 0);
+  const totalPercent = capacity > 0 ? (totalSubscribed / capacity) * 100 : 0;
+
+  if (!foundViewerBand) {
+    let atOrAboveAmt = 0;
+    countedPledges.forEach((p) => {
+      if ((Number(p.investor_class_at_pledge) || 10) <= viewerClassNum) {
+        atOrAboveAmt += Number(p.pledged_amount || 0);
+      }
+    });
+    viewerCumulativePercent = capacity > 0 ? (atOrAboveAmt / capacity) * 100 : 0;
+  }
+
+  return {
+    bands: finalBands,
+    totalPercent: Math.round(totalPercent * 10) / 10,
+    softCapPercent: Math.round(softCapPercent * 10) / 10,
+    viewerCumulativePercent: Math.round(viewerCumulativePercent * 10) / 10,
+    viewerClass: viewerClassNum,
+    capacity,
+    totalSubscribed,
+    isOversubscribed: totalPercent > 100,
+  };
+}
+
+/**
+ * Server-side function (service key, after visibility check) that returns
+ * conversion pool demand for Class 1-4 viewers.
+ */
+export async function getProjectConversionDemand(slug, viewerClassNum) {
+  const project = await getProjectDetailBySlug(slug, viewerClassNum);
+  if (!project) return null;
+
+  const isSpvEquity = project.sharia_contract_type === "spv_equity";
+  const spvDetail = Array.isArray(project.spv_details)
+    ? project.spv_details[0]
+    : project.spv_details;
+  const isConversionActive = Boolean(!isSpvEquity && project.is_spv && spvDetail?.conversion_enabled);
+
+  if (!isConversionActive || viewerClassNum > 4) {
+    return null;
+  }
+
+  const totalSharesAuth = Number(spvDetail?.total_shares_authorized) || 0;
+  const ratioShares = Number(spvDetail?.conversion_ratio_shares) || 1;
+  const poolUnits = ratioShares > 0 ? Math.floor(totalSharesAuth / ratioShares) : 0;
+
+  if (poolUnits <= 0) return null;
+
+  const { data: pledgesData } = await supabaseAdmin
+    .from("pledges")
+    .select("investor_class_at_pledge, requested_conversion_units, conversion_eligible_units, status")
+    .eq("project_id", project.id);
+
+  const countedPledges = (pledgesData || []).filter(
+    (p) => !["cancelled", "refunded", "rejected_oversubscribed"].includes((p.status || "").toLowerCase())
+  );
+
+  const contributingPledges = countedPledges.filter(
+    (p) => Number(p.requested_conversion_units ?? p.conversion_eligible_units ?? 0) > 0
+  );
+
+  const totalDemand = countedPledges.reduce(
+    (sum, p) => sum + Number(p.requested_conversion_units ?? p.conversion_eligible_units ?? 0),
+    0
+  );
+
+  const demandAtOrAboveViewer = countedPledges
+    .filter((p) => (Number(p.investor_class_at_pledge) || 10) <= viewerClassNum)
+    .reduce((sum, p) => sum + Number(p.requested_conversion_units ?? p.conversion_eligible_units ?? 0), 0);
+
+  const isOversubscribed = totalDemand > poolUnits;
+  const viewerPriorityPercent = poolUnits > 0 ? Math.round(((demandAtOrAboveViewer / poolUnits) * 100) * 10) / 10 : 0;
+  const totalDemandPercent = poolUnits > 0 ? Math.round(((totalDemand / poolUnits) * 100) * 10) / 10 : 0;
+
+  return {
+    isLowDemand: contributingPledges.length < 3,
+    poolUnits,
+    totalDemand,
+    totalDemandPercent,
+    viewerPriorityPercent,
+    demandAtOrAboveViewer,
+    isOversubscribed,
+    viewerClass: viewerClassNum,
+    contributingPledgeCount: contributingPledges.length,
+  };
 }
 

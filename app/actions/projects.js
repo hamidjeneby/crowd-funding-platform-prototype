@@ -4,6 +4,11 @@ import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import slugify from "slugify";
 import { triggerMakeWebhook } from "@/lib/webhook";
+import {
+  createStep3FinancialsSchema,
+  validateContractTerms,
+  getYieldTypeForContract,
+} from "@/lib/validation/repaymentTermsSchema";
 
 // Helper function to get issuer record by orgId
 async function getIssuerByOrgId(orgId) {
@@ -267,7 +272,7 @@ export async function updateProjectDraft(projectId, data, step) {
   // Confirm ownership and editable status (draft or incomplete)
   const { data: project, error: projectError } = await supabaseAdmin
     .from("projects")
-    .select("issuer_id, status, current_step, shariah_compliance_status")
+    .select("issuer_id, status, current_step, shariah_compliance_status, slug, sharia_contract_type, campaign_end_date")
     .eq("id", projectId)
     .single();
 
@@ -286,11 +291,12 @@ export async function updateProjectDraft(projectId, data, step) {
   const isShariahApproved = project.shariah_compliance_status === "approved";
 
   let updateError = null;
+  let finalSlug = project.slug;
 
   switch (step) {
     case 1: {
       if (!isShariahApproved && data.title) {
-        let slug = slugify(data.title || "", { lower: true, strict: true });
+        let slug = slugify(data.title || "project", { lower: true, strict: true }) || "project";
         let isUnique = false;
         let counter = 0;
         let currentSlug = slug;
@@ -322,6 +328,9 @@ export async function updateProjectDraft(projectId, data, step) {
           .eq("id", projectId);
 
         updateError = error;
+        if (!error) {
+          finalSlug = currentSlug;
+        }
       }
 
       // Handle Issuer Milestones
@@ -391,14 +400,25 @@ export async function updateProjectDraft(projectId, data, step) {
     case 2: {
       if (!isShariahApproved) {
         const unitType = data.sharia_contract_type === "spv_equity" ? "shares" : "sukuk";
+        const contractTypeChanged = Boolean(
+          project.sharia_contract_type &&
+          project.sharia_contract_type !== data.sharia_contract_type
+        );
+
+        const projectUpdates = {
+          sharia_contract_type: data.sharia_contract_type,
+          is_spv: data.is_spv,
+          unit_type: unitType,
+        };
+
+        if (contractTypeChanged) {
+          projectUpdates.tenor_months = null;
+          projectUpdates.contract_terms = null;
+        }
 
         const { error } = await supabaseAdmin
           .from("projects")
-          .update({
-            sharia_contract_type: data.sharia_contract_type,
-            is_spv: data.is_spv,
-            unit_type: unitType,
-          })
+          .update(projectUpdates)
           .eq("id", projectId);
 
         updateError = error;
@@ -478,7 +498,39 @@ export async function updateProjectDraft(projectId, data, step) {
     }
     case 3: {
       if (!isShariahApproved) {
-        // Financials (now on projects table)
+        // Fetch SPV details for conversion and financial validation
+        const { data: spvRow } = await supabaseAdmin
+          .from("spv_details")
+          .select("id, conversion_enabled, conversion_ratio_shares, total_shares_authorized, conversion_deadline")
+          .eq("project_id", projectId)
+          .maybeSingle();
+
+        const currentContractType = project.sharia_contract_type;
+        const isSpvEquity = currentContractType === "spv_equity";
+
+        // Server-side validation using shared Step 3 schema
+        const step3Schema = createStep3FinancialsSchema({
+          shariaContractType: currentContractType,
+          conversionEnabled: Boolean(spvRow?.conversion_enabled),
+          conversionRatioShares: Number(spvRow?.conversion_ratio_shares) || 0,
+          totalSharesAuthorized: Number(spvRow?.total_shares_authorized) || 0,
+          conversionDeadline: spvRow?.conversion_deadline || null,
+        });
+
+        const validationResult = step3Schema.safeParse(data);
+        if (!validationResult.success) {
+          const firstErr = validationResult.error.issues?.[0]?.message || "Validation failed for financial terms";
+          throw new Error(firstErr);
+        }
+
+        // Validate and clean contract_terms
+        const termsValidation = validateContractTerms(currentContractType, data.contract_terms);
+        if (!termsValidation.success) {
+          const firstTermsErr = termsValidation.error?.issues?.[0]?.message || "Invalid contract repayment terms";
+          throw new Error(firstTermsErr);
+        }
+
+        const serverYieldType = getYieldTypeForContract(currentContractType) || data.yield_type;
         const campaignEndDateIso = data.campaign_end_date ? parseAsUtcIso(data.campaign_end_date) : null;
 
         const { error } = await supabaseAdmin
@@ -489,11 +541,13 @@ export async function updateProjectDraft(projectId, data, step) {
             hard_cap: data.hard_cap,
             min_investment_floor: data.min_investment_floor,
             unit_price: data.unit_price || null,
-            expected_roi_percent: data.expected_roi_percent,
-            yield_type: data.yield_type,
+            expected_roi_percent: isSpvEquity ? null : (data.expected_roi_percent ? Number(data.expected_roi_percent) : null),
+            yield_type: serverYieldType,
             currency: data.currency,
             clearing_option: data.clearing_option,
             campaign_end_date: campaignEndDateIso,
+            tenor_months: isSpvEquity ? null : (data.tenor_months ? Number(data.tenor_months) : null),
+            contract_terms: termsValidation.data,
           })
           .eq("id", projectId);
 
@@ -502,20 +556,6 @@ export async function updateProjectDraft(projectId, data, step) {
         if (!updateError) {
           // Keep system milestones in sync with campaign_end_date
           await ensureSystemMilestonesExist(projectId, campaignEndDateIso);
-
-          const { data: proj } = await supabaseAdmin
-            .from("projects")
-            .select("sharia_contract_type")
-            .eq("id", projectId)
-            .maybeSingle();
-
-          const isSpvEquity = proj?.sharia_contract_type === "spv_equity";
-
-          const { data: spvRow } = await supabaseAdmin
-            .from("spv_details")
-            .select("id, conversion_enabled, conversion_ratio_shares, total_shares_authorized")
-            .eq("project_id", projectId)
-            .maybeSingle();
 
           if (spvRow) {
             let calculatedTotalCost = null;
@@ -580,7 +620,7 @@ export async function updateProjectDraft(projectId, data, step) {
     }
   }
 
-  return { success: true, current_step: newHighestStep };
+  return { success: true, current_step: newHighestStep, slug: finalSlug };
 }
 
 // Final submission
@@ -608,7 +648,7 @@ export async function submitProjectForReview(projectId) {
     throw new Error("Unauthorized: Project ownership mismatch.");
   }
 
-  if (project.status !== "draft") {
+  if (project.status !== "draft" && project.status !== "incomplete") {
     throw new Error("Cannot submit project: Status is not draft.");
   }
 
@@ -630,6 +670,23 @@ export async function submitProjectForReview(projectId) {
   if (!project.yield_type) missingFields.push("yield_type");
   if (!project.currency) missingFields.push("currency");
   if (!project.clearing_option) missingFields.push("clearing_option");
+
+  // Repayment terms and tenor completeness check
+  if (project.sharia_contract_type !== "spv_equity") {
+    const tenorNum = Number(project.tenor_months);
+    if (!project.tenor_months || isNaN(tenorNum) || tenorNum < 1 || tenorNum > 120) {
+      missingFields.push("tenor_months");
+    }
+  }
+
+  // Validate contract_terms using strict Zod schema for contract type
+  const contractTermsResult = validateContractTerms(
+    project.sharia_contract_type,
+    project.contract_terms
+  );
+  if (!contractTermsResult.success) {
+    missingFields.push("contract_terms");
+  }
 
   const { data: docs } = await supabaseAdmin
     .from("project_docs")
@@ -659,14 +716,44 @@ export async function submitProjectForReview(projectId) {
     return { success: false, missingFields };
   }
 
+  const projectUpdates = {
+    status: "pending_review",
+    review_notes: null,
+  };
+
+  // If shariah_compliance_status was not approved before, change to pending upon submission/resubmission.
+  // If it was approved before, it stays approved because the issuer was locked from editing SPV and project details.
+  if (project.shariah_compliance_status !== "approved") {
+    projectUpdates.shariah_compliance_status = "pending";
+  }
+
   const { error: updateError } = await supabaseAdmin
     .from("projects")
-    .update({ status: "pending_review", review_notes: null })
+    .update(projectUpdates)
     .eq("id", projectId);
 
   if (updateError) {
     console.error("Error submitting project:", updateError);
     throw new Error("Failed to submit project.");
+  }
+
+  // Reset SPV rejection reason and verification status upon project submission for review.
+  // If shariah was not approved, reset verification to pending and clear rejection_reason.
+  // If shariah was already approved, SPV details remain approved; ensure rejection_reason is null.
+  const spvUpdates = {
+    rejection_reason: null,
+  };
+  if (project.shariah_compliance_status !== "approved") {
+    spvUpdates.spv_detail_verification_status = "pending";
+  }
+
+  const { error: spvResetErr } = await supabaseAdmin
+    .from("spv_details")
+    .update(spvUpdates)
+    .eq("project_id", projectId);
+
+  if (spvResetErr) {
+    console.warn("Could not reset spv_details status/rejection_reason:", spvResetErr.message);
   }
 
   // Trigger Make Webhook for project review

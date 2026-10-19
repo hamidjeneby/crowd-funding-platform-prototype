@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:pledge": "node --env-file=.env.local scripts/test-pledge-model.mjs"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.6.4",

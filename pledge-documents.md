@@ -21,43 +21,53 @@ private document on the platform.
 
 ## `pledge_docs` table shape
 
-| Column       | Type            | Notes                                                                 |
-| ------------ | --------------- | --------------------------------------------------------------------- |
-| id           | PK              |                                                                       |
-| pledge_id    | FK → pledges.id |                                                                       |
-| doc_type     | enum            | `subscription_agreement / sukuk_certificate / distribution_statement` |
-| file_url     | text            | private bucket, signed URL on access                                  |
-| generated_at | timestamp       |                                                                       |
+| Column          | Type            | Notes                                                                 |
+| --------------- | --------------- | --------------------------------------------------------------------- |
+| `id`            | PK (bigint)     |                                                                       |
+| `pledge_id`     | FK → pledges.id | Internal integer foreign key                                          |
+| `doc_type`      | enum / text     | `subscription_agreement / sukuk_certificate / distribution_statement` |
+| `terms_version` | text            | Legal terms version agreed to (e.g. `"v1.0"`)                         |
+| `signed_at`     | timestamptz     | UTC ISO timestamp captured when user accepted terms and submitted      |
+| `signed_ip`     | text            | Client IP captured from request headers at submission                 |
+| `file_url`      | text (nullable) | Private bucket path, signed URL on access; null until PDF is generated|
+| `generated_at`  | timestamptz     | Timestamp when background generation job uploaded the PDF (nullable)  |
 
 ---
 
 ## 1. Subscription Agreement
 
-**Stage generated:** The moment a pledge is submitted (`pledges.status =
-'pending'`) — before campaign close, before allocation is known.
+**Stage generated:** The moment a pledge is submitted (`pledges.status = 'pending'`) — before campaign close, before allocation is known.
 
-**What it represents:** This is a conditional legal commitment, not a
-completed sale. It must be written and understood as an offer to subscribe,
-subject to final acceptance — because the actual allocated amount may come in
-lower than what was pledged if the campaign is oversubscribed. The document
-should say this explicitly, not imply a guaranteed position.
+**Pledge-Time Database Insert & Make Webhook:**
+1. A row is inserted immediately into `pledge_docs` with:
+   - `doc_type: 'subscription_agreement'`
+   - `terms_version: 'v1.0'`
+   - `signed_at`: server timestamp ISO
+   - `signed_ip`: verified client IP
+   - `file_url: null`
+   - `generated_at: null`
+2. The server action dispatches a fire-and-forget webhook payload to Make (`MAKE_SUBSCRIPTION_AGREEMENT_WEBHOOK_URL` / `MAKE_WEBHOOK_URL`) with header `x-make-apikey: process.env.WEBHOOK_API_KEY`.
+3. The webhook payload contains only necessary audit and contract parameters:
+   - `eventType`: `"subscription_agreement_requested"`
+   - `pledgeId`, `investorId`, `projectId`, `projectSlug`
+   - `pledgedAmount`, `estimatedUnits`, `requestedConversionUnits`
+   - `investorClass`, `feePercent`, `feeAmount`, `currency`, `shariaContractType`
+   - `termsVersion`, `signedAt`, `signedIp`, `timestamp`
+   *(Explicitly excludes investor PII, bank accounts, wallet balances, or secrets).*
+4. Make receives the webhook, populates the legal master template, renders to PDF, uploads to the private `pledge_docs` Supabase storage bucket, and emails the agreement to the investor.
+
+**What it represents:** This is a conditional legal commitment, not a completed sale. It must be written and understood as an offer to subscribe, subject to final allocation at campaign close — because the actual allocated amount may come in lower than what was pledged if the campaign is oversubscribed. The document says this explicitly and does not imply a guaranteed position.
 
 **Contents:**
-
-- Investor identity (name/legal entity name, matching onboarding records)
-- Project and issuer/SPV identity (the investor is contracting with the
-  issuer/SPV, not with the platform — the platform is the facilitator)
-- Pledged amount
+- Investor identity (matching onboarding records)
+- Project and issuer/SPV identity (the investor is contracting with the issuer/SPV facilitated by the platform)
+- Pledged amount and estimated units (`pledged_amount ÷ unit_price`)
 - `investor_class_at_pledge`
 - `fee_percent_at_pledge` and computed fee amount
-- Unit price and estimated units (`pledged_amount ÷ unit_price`)
-- Sharia contract type and a plain-terms summary of how it works (Murabaha /
-  Mudarabah / Ijara / SPV Equity mechanics)
-- Conversion clause terms, if enabled on the project (trigger price, ratio,
-  deadline) — only included when applicable
-- Explicit clause stating the subscription is conditional on final allocation
-  and may be filled in full, in part, or not at all
-- E-signature capture: timestamp and IP, same pattern as onboarding consent
+- Unit price and Sharia contract type summary (Murabaha / Mudarabah / Ijara / SPV Equity mechanics)
+- Conversion clause terms, if enabled on the project (trigger price, ratio, deadline) — only included when applicable
+- Explicit clause stating the subscription is conditional on final allocation and may be filled in full, in part, or not at all
+- E-signature audit record: `signed_at` and `signed_ip` matching the accepted terms version `"v1.0"`
 
 ---
 

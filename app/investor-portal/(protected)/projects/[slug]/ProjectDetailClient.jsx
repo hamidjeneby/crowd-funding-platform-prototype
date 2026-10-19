@@ -7,6 +7,8 @@ export default function ProjectDetailClient({
   investor,
   investorClass,
   eligibility,
+  classBandSubscription,
+  conversionDemand,
 }) {
   return (
     <ProjectDetailView
@@ -14,6 +16,8 @@ export default function ProjectDetailClient({
       investor={investor}
       investorClass={investorClass}
       eligibility={eligibility}
+      classBandSubscription={classBandSubscription}
+      conversionDemand={conversionDemand}
       viewerRole="investor"
     />
   );

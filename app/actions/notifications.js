@@ -144,9 +144,9 @@ export async function evaluateThresholdNotifications(projectId, newPledgeId) {
     // 2. Fetch all active pledges for project
     const { data: pledges } = await supabaseAdmin
       .from("pledges")
-      .select("id, pledged_amount, conversion_eligible_units, status")
+      .select("id, pledged_amount, requested_conversion_units, conversion_eligible_units, status")
       .eq("project_id", projectId)
-      .not("status", "in", '("cancelled","refunded")');
+      .not("status", "in", '("cancelled","refunded","rejected_oversubscribed")');
 
     if (!pledges || pledges.length === 0) return;
 
@@ -156,7 +156,7 @@ export async function evaluateThresholdNotifications(projectId, newPledgeId) {
     const currency = project.currency || "USD";
     const targetGoal = Number(project.target_goal) || 0;
 
-    // --- FUNDING THRESHOLD EVALUATION ---
+    // --- SUBSCRIPTION THRESHOLD EVALUATION ---
     if (targetGoal > 0) {
       const totalPledgedAfter = pledges.reduce((sum, p) => sum + Number(p.pledged_amount || 0), 0);
       const newPledgeAmount = Number(newPledge.pledged_amount || 0);
@@ -207,8 +207,8 @@ export async function evaluateThresholdNotifications(projectId, newPledgeId) {
                 project_id: projectId,
                 type: "funding_threshold",
                 notification_text: textKey,
-                title: `${project.title} Reached ${T}% Funding!`,
-                message: `Project campaign "${project.title}" has officially reached ${T}% of its funding target with ${currency} ${totalPledgedAfter.toLocaleString()} pledged.`,
+                title: `${project.title} Reached ${T}% Subscribed!`,
+                message: `Project campaign "${project.title}" has officially reached ${T}% subscribed with ${currency} ${totalPledgedAfter.toLocaleString()} pledged.`,
                 read_status: false,
               }));
 
@@ -231,10 +231,10 @@ export async function evaluateThresholdNotifications(projectId, newPledgeId) {
 
       if (totalConvertibleUnits > 0) {
         const totalConvertedAfter = pledges.reduce(
-          (sum, p) => sum + Number(p.conversion_eligible_units || 0),
+          (sum, p) => sum + Number(p.requested_conversion_units ?? p.conversion_eligible_units ?? 0),
           0
         );
-        const newConvertedUnits = Number(newPledge.conversion_eligible_units || 0);
+        const newConvertedUnits = Number(newPledge.requested_conversion_units ?? newPledge.conversion_eligible_units ?? 0);
         const totalConvertedBefore = totalConvertedAfter - newConvertedUnits;
 
         const pctBeforeConv = (totalConvertedBefore / totalConvertibleUnits) * 100;
@@ -289,8 +289,8 @@ export async function evaluateThresholdNotifications(projectId, newPledgeId) {
                   project_id: projectId,
                   type: "conversion_pool",
                   notification_text: textKey,
-                  title: `${project.title} Conversion Pool ${T}% Filled`,
-                  message: `The equity conversion pool for "${project.title}" is now ${T}% claimed (${totalConvertedAfter.toLocaleString()} of ${totalConvertibleUnits.toLocaleString()} units allocated).`,
+                  title: `${project.title} Conversion Pool ${T}% Requested`,
+                  message: `The equity conversion pool for "${project.title}" is now ${T}% requested (${totalConvertedAfter.toLocaleString()} of ${totalConvertibleUnits.toLocaleString()} units requested). Final units are set at allocation.`,
                   read_status: false,
                 }));
 
@@ -331,6 +331,23 @@ export async function getInvestorNotifications(options = {}) {
     if (typeFilter && typeFilter !== "all") {
       if (typeFilter === "funding_threshold") {
         query = query.or("type.eq.funding_threshold,type.eq.funding_threshhold");
+      } else if (typeFilter === "allocation") {
+        query = query.in("type", [
+          "allocation_full",
+          "allocation_partial",
+          "allocation_none",
+          "campaign_failed",
+          "campaign_closed",
+        ]);
+      } else if (typeFilter === "campaign_alert") {
+        query = query.in("type", [
+          "campaign_alert",
+          "campaign_closed",
+          "allocation_full",
+          "allocation_partial",
+          "allocation_none",
+          "campaign_failed",
+        ]);
       } else {
         query = query.eq("type", typeFilter);
       }
@@ -373,50 +390,146 @@ export async function getInvestorNotifications(options = {}) {
 }
 
 /**
- * Triggers milestone completion notifications to subscribed investors when a milestone is completed.
- * (As specified in Section 5 of notifications_guide.md)
+ * Triggers milestone completion notifications to subscribed investors when a milestone is completed or reached.
+ * 
+ * 1. Checks project_notification_subscriptions to verify if that specific project is present
+ *    (meaning at least one investor has enabled notifications for that project).
+ * 2. Fetches all rows matching project_id and notify_milestones = true.
+ * 3. Applies deduplication to prevent repeated alerts for the same milestone.
+ * 4. Inserts new rows into notifications table with:
+ *    - investor_id
+ *    - project_id
+ *    - type: "milestone"
+ *    - title: milestone.title (or formatted title)
+ *    - message: milestone.description (or detailed message)
+ *    - read_status: "false"
+ *    - notification_text: "issuer_milestone" or "system_milestone"
  */
-export async function triggerMilestoneCompletedNotifications(milestoneId) {
-  if (!milestoneId) return;
+export async function notifyInvestorsOnMilestoneCompleted(projectId, milestoneId) {
+  if (!milestoneId) return { success: false, reason: "Missing milestoneId" };
+
   try {
-    const { data: milestone } = await supabaseAdmin
+    const numMilestoneId = !isNaN(Number(milestoneId)) ? Number(milestoneId) : milestoneId;
+    let numProjectId = projectId && !isNaN(Number(projectId)) ? Number(projectId) : projectId;
+
+    // Fetch milestone details
+    const { data: milestone, error: mErr } = await supabaseAdmin
       .from("project_milestones")
-      .select("*, projects(id, title, slug)")
-      .eq("id", milestoneId)
+      .select("id, project_id, title, description, milestone_source, status")
+      .eq("id", numMilestoneId)
       .maybeSingle();
 
-    if (!milestone || (milestone.status || "").toLowerCase() !== "completed") return;
+    if (mErr || !milestone) {
+      console.error("Error fetching milestone details:", mErr);
+      return { success: false, error: "Milestone not found" };
+    }
 
-    const projectId = milestone.project_id;
-    const project = milestone.projects;
-    if (!project) return;
+    if (!numProjectId) {
+      numProjectId = milestone.project_id;
+    }
 
-    // Fetch subscribers for milestones
-    const { data: subs } = await supabaseAdmin
+    // Step 1: Check project_notification_subscriptions table to see if that specific project is present
+    const { count: projectSubscriptionCount, error: countErr } = await supabaseAdmin
+      .from("project_notification_subscriptions")
+      .select("id", { count: "exact", head: true })
+      .eq("project_id", numProjectId);
+
+    if (countErr) {
+      console.error("Error checking project notification subscriptions:", countErr);
+    }
+
+    if (!projectSubscriptionCount || projectSubscriptionCount === 0) {
+      // No investor has enabled notifications for this project at all
+      return { success: true, notifiedCount: 0, reason: "No subscribers exist for this project" };
+    }
+
+    // Step 2: Get all rows that have that project_id and notify_milestones field of true
+    const { data: subscribers, error: subsErr } = await supabaseAdmin
       .from("project_notification_subscriptions")
       .select("investor_id")
-      .eq("project_id", projectId)
+      .eq("project_id", numProjectId)
       .eq("notify_milestones", true);
 
-    if (!subs || subs.length === 0) return;
+    if (subsErr) {
+      console.error("Error fetching milestone subscribers:", subsErr);
+      return { success: false, error: subsErr.message };
+    }
+
+    if (!subscribers || subscribers.length === 0) {
+      return { success: true, notifiedCount: 0, reason: "No subscribers have notify_milestones enabled" };
+    }
+
+    // Fetch project title for enriched notification text if available
+    const { data: project } = await supabaseAdmin
+      .from("projects")
+      .select("id, title")
+      .eq("id", numProjectId)
+      .maybeSingle();
 
     const isSystem = milestone.milestone_source === "system";
-    const textKey = isSystem ? "system_milestone" : "issuer_milestone";
+    const notificationText = isSystem ? "system_milestone" : "issuer_milestone";
 
-    const notificationsToInsert = subs.map((sub) => ({
+    const milestoneTitle = milestone.title || "Milestone";
+    const title =
+      milestoneTitle.toLowerCase().includes("completed") ||
+      milestoneTitle.toLowerCase().includes("reached")
+        ? milestoneTitle
+        : `${milestoneTitle} Reached`;
+
+    const message = `${milestoneTitle} has been reached.`;
+
+    // Step 3: Deduplication check - verify which investors haven't received this milestone notification
+    const investorIds = subscribers.map((s) => s.investor_id).filter(Boolean);
+    const { data: existingNotifs } = await supabaseAdmin
+      .from("notifications")
+      .select("investor_id")
+      .eq("project_id", numProjectId)
+      .eq("type", "milestone")
+      .eq("title", title)
+      .in("investor_id", investorIds);
+
+    const alreadyNotifiedIds = new Set((existingNotifs || []).map((n) => n.investor_id));
+
+    const eligibleSubscribers = subscribers.filter(
+      (sub) => sub.investor_id && !alreadyNotifiedIds.has(sub.investor_id)
+    );
+
+    if (eligibleSubscribers.length === 0) {
+      return { success: true, notifiedCount: 0, reason: "All eligible investors were already notified" };
+    }
+
+    // Step 4: For each eligible subscriber, insert a new row in notifications table
+    const notificationsToInsert = eligibleSubscribers.map((sub) => ({
       investor_id: sub.investor_id,
-      project_id: projectId,
+      project_id: numProjectId,
       type: "milestone",
-      notification_text: textKey,
-      title: `${project.title}: Milestone Completed!`,
-      message: `Milestone "${milestone.title}" has been completed for project "${project.title}".`,
-      read_status: false,
+      title,
+      message,
+      read_status: "false",
+      notification_text: notificationText,
     }));
 
-    await supabaseAdmin.from("notifications").insert(notificationsToInsert);
+    const { error: insertErr } = await supabaseAdmin
+      .from("notifications")
+      .insert(notificationsToInsert);
+
+    if (insertErr) {
+      console.error("Error creating milestone notifications:", insertErr);
+      return { success: false, error: insertErr.message };
+    }
+
+    return { success: true, notifiedCount: notificationsToInsert.length };
   } catch (err) {
-    console.error("Error triggering milestone completion notification:", err);
+    console.error("Unexpected error in notifyInvestorsOnMilestoneCompleted:", err);
+    return { success: false, error: err.message };
   }
+}
+
+/**
+ * Backward-compatible alias for triggerMilestoneCompletedNotifications
+ */
+export async function triggerMilestoneCompletedNotifications(milestoneId) {
+  return notifyInvestorsOnMilestoneCompleted(null, milestoneId);
 }
 
 /**
@@ -508,3 +621,127 @@ export async function markAllNotificationsAsRead() {
   revalidatePath("/investor-portal");
   return { success: true };
 }
+
+/**
+ * Dispatches an account-level notification to an investor when their onboarding review
+ * is finalized by an auditor. (No project_id)
+ *
+ * Scenarios:
+ * - approved: "onboarding_approved" -> explore campaigns and invest
+ * - sent_back: "onboarding_sent_back" -> review feedback, update info, resubmit
+ * - rejected: "onboarding_rejected" -> contact support for assistance
+ */
+export async function notifyInvestorOnboardingDecision(investorId, decision, reviewNotes = null) {
+  if (!investorId) return { success: false, error: "Missing investor ID" };
+
+  const numInvestorId = !isNaN(Number(investorId)) ? Number(investorId) : investorId;
+  const normalized = String(decision || "").toLowerCase().trim();
+
+  let notificationText = "";
+  let title = "";
+  let message = "";
+
+  if (normalized === "approve" || normalized === "approved" || normalized === "completed") {
+    notificationText = "onboarding_approved";
+    title = "Onboarding Approved";
+    message = "Your investor onboarding has been approved. You can now explore live campaigns and start investing.";
+  } else if (normalized === "send_back" || normalized === "sent_back" || normalized === "incomplete") {
+    notificationText = "onboarding_sent_back";
+    title = "Onboarding Action Required";
+    message = "Your application was sent back for updates. Please review the feedback, update your details, and resubmit.";
+  } else if (normalized === "reject" || normalized === "rejected") {
+    notificationText = "onboarding_rejected";
+    title = "Onboarding Rejected";
+    message = "Your investor onboarding application has been rejected. Please contact support for assistance.";
+  } else {
+    return { success: false, error: `Invalid onboarding decision: ${decision}` };
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("notifications")
+      .insert({
+        investor_id: numInvestorId,
+        project_id: null,
+        type: "onboarding",
+        notification_text: notificationText,
+        title,
+        message,
+        read_status: false,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error creating onboarding notification:", error);
+      return { success: false, error: error.message };
+    }
+
+    revalidatePath("/investor-portal/notifications");
+    revalidatePath("/investor-portal");
+    return { success: true, notification: data };
+  } catch (err) {
+    console.error("Unexpected error in notifyInvestorOnboardingDecision:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Dispatches an account-level notification to an investor when their bank details
+ * verification is decided by an auditor. (No project_id)
+ *
+ * Scenarios:
+ * - approved: "bank_verified" -> wallet withdrawals and payout distributions active
+ * - rejected: "bank_rejected" -> update banking information in settings with valid proof
+ */
+export async function notifyInvestorBankVerificationDecision(investorId, decision, rejectionReason = null) {
+  if (!investorId) return { success: false, error: "Missing investor ID" };
+
+  const numInvestorId = !isNaN(Number(investorId)) ? Number(investorId) : investorId;
+  const normalized = String(decision || "").toLowerCase().trim();
+
+  let notificationText = "";
+  let title = "";
+  let message = "";
+
+  if (normalized === "approve" || normalized === "approved") {
+    notificationText = "bank_verified";
+    title = "Bank Details Verified";
+    message = "Your bank account has been verified. Wallet withdrawals and payout distributions are now active.";
+  } else if (normalized === "reject" || normalized === "rejected") {
+    notificationText = "bank_rejected";
+    title = "Bank Verification Rejected";
+    message = "Your submitted bank details could not be verified. Please update your banking information in settings with valid proof.";
+  } else {
+    return { success: false, error: `Invalid bank decision: ${decision}` };
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("notifications")
+      .insert({
+        investor_id: numInvestorId,
+        project_id: null,
+        type: "banking",
+        notification_text: notificationText,
+        title,
+        message,
+        read_status: false,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error creating bank verification notification:", error);
+      return { success: false, error: error.message };
+    }
+
+    revalidatePath("/investor-portal/notifications");
+    revalidatePath("/investor-portal");
+    return { success: true, notification: data };
+  } catch (err) {
+    console.error("Unexpected error in notifyInvestorBankVerificationDecision:", err);
+    return { success: false, error: err.message };
+  }
+}
+

@@ -116,8 +116,13 @@ export default async function ProjectsPage() {
         return "bg-amber-100 text-amber-800 border-amber-300";
       case "campaign_live":
         return "bg-emerald-600 text-white border-emerald-700 shadow-xs";
+      case "closing":
+        return "bg-amber-500 text-white border-amber-600 shadow-xs";
       case "funded":
         return "bg-teal-600 text-white border-teal-700 shadow-xs";
+      case "failed":
+        return "bg-rose-600 text-white border-rose-700 shadow-xs";
+      case "completed":
       case "closed":
         return "bg-slate-700 text-white border-slate-800";
       default:
@@ -161,7 +166,7 @@ export default async function ProjectsPage() {
             No projects listed
           </h2>
           <p className="text-gray-500 mb-8 max-w-md text-sm">
-            You haven't created any crowdfunding projects yet. Start by creating
+            You haven&apos;t created any crowdfunding projects yet. Start by creating
             your first project draft to raise capital.
           </p>
           <Link
@@ -184,13 +189,32 @@ export default async function ProjectsPage() {
 
             const targetGoal = Number(project.target_goal) || 0;
             const liveRaised = Number(project.live_raised_amount) || 0;
+            const isFunded = status === "funded";
+            const isFailed = status === "failed";
+            const isClosing = status === "closing";
+            const isLive = status === "campaign_live";
+            const allocatedTotal =
+              project.allocated_total != null
+                ? Number(project.allocated_total)
+                : liveRaised;
+            const subscribedAtClose =
+              project.subscribed_total_at_close != null
+                ? Number(project.subscribed_total_at_close)
+                : liveRaised;
+            const displayRaised = isFunded
+              ? allocatedTotal
+              : isFailed
+                ? subscribedAtClose
+                : liveRaised;
             const rawPercent =
-              targetGoal > 0 ? (liveRaised / targetGoal) * 100 : 0;
-            const percent = Math.min(rawPercent, 100).toFixed(1);
+              targetGoal > 0 ? (displayRaised / targetGoal) * 100 : 0;
+            // Remove clamp from displayed percentage so it can read 130%. Cap only visual fill at 100%.
+            const percent = rawPercent.toFixed(1);
             const daysRemaining = getDaysRemaining(
               project.campaign_end_date || project.deadline
             );
             const currency = project.currency || "USD";
+            const isOversubscribed = isLive && rawPercent > 100;
 
             return (
               <div
@@ -216,8 +240,13 @@ export default async function ProjectsPage() {
 
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent"></div>
 
-                  {/* Status Badge */}
-                  <div className="absolute top-4 right-4">
+                  {/* Status Badge & Oversubscribed Badge */}
+                  <div className="absolute top-4 right-4 flex items-center gap-1.5 flex-wrap justify-end">
+                    {isOversubscribed && (
+                      <span className="px-2.5 py-1 text-[11px] font-black rounded-full bg-purple-600 text-white border border-purple-400 shadow-sm uppercase tracking-wider">
+                        Oversubscribed
+                      </span>
+                    )}
                     <span
                       className={`px-3 py-1 text-[11px] font-extrabold rounded-full border uppercase tracking-wider ${getStatusBadgeStyle(
                         status
@@ -243,12 +272,20 @@ export default async function ProjectsPage() {
                     {project.summary || "No summary provided."}
                   </p>
 
-                  {/* Funding Progress & Days Remaining */}
+                  {/* Funding/Subscription Progress & Days Remaining */}
                   <div className="space-y-2.5 bg-[#fdfbf7] p-3.5 rounded-2xl border border-emerald-100">
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-semibold text-gray-500 flex items-center gap-1">
                         <TrendingUp className="w-3.5 h-3.5 text-[#059669]" />{" "}
-                        Funding Progress
+                        {isFunded
+                          ? "Funded"
+                          : isFailed
+                            ? "Campaign Failed"
+                            : isClosing
+                              ? "Allocation in Progress"
+                              : isLive
+                                ? "Subscription Progress"
+                                : "Funding Progress"}
                       </span>
                       <span className="font-extrabold text-[#064e3b]">
                         {percent}%
@@ -257,18 +294,26 @@ export default async function ProjectsPage() {
 
                     <div className="w-full bg-gray-200 h-2.5 rounded-full overflow-hidden">
                       <div
-                        className="bg-gradient-to-r from-[#059669] to-[#047857] h-full rounded-full transition-all duration-500"
-                        style={{ width: `${percent}%` }}
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          isFailed
+                            ? "bg-rose-500"
+                            : "bg-gradient-to-r from-[#059669] to-[#047857]"
+                        }`}
+                        style={{ width: `${Math.min(rawPercent, 100)}%` }}
                       />
                     </div>
 
                     <div className="flex items-center justify-between text-xs pt-1">
                       <div>
                         <span className="text-[10px] text-gray-400 block font-medium uppercase">
-                          Raised
+                          {isFunded
+                            ? "Allocated"
+                            : isLive
+                              ? "Subscribed"
+                              : "Raised"}
                         </span>
                         <span className="font-bold text-gray-900 text-xs">
-                          {currency} {liveRaised.toLocaleString()}
+                          {currency} {displayRaised.toLocaleString()}
                         </span>
                       </div>
                       <div className="text-right">
@@ -284,7 +329,23 @@ export default async function ProjectsPage() {
                       </div>
                     </div>
 
-                    {daysRemaining !== null && (
+                    {(isFunded || isFailed) && (
+                      <div className="pt-1 border-t border-emerald-100/60 text-[11px] text-gray-600 flex items-center justify-between">
+                        <span>
+                          Subscribed at close: {currency}{" "}
+                          {subscribedAtClose.toLocaleString()}
+                        </span>
+                        {isFailed && project.failure_reason && (
+                          <span className="text-rose-700 font-bold">
+                            {project.failure_reason === "no_pledges"
+                              ? "No pledges"
+                              : "Soft cap not met"}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {isLive && daysRemaining !== null && (
                       <div className="flex items-center gap-1 text-[11px] font-semibold text-emerald-800 pt-1 border-t border-emerald-100/60">
                         <Clock className="w-3.5 h-3.5 text-[#059669]" />
                         <span>{daysRemaining} days remaining in campaign</span>

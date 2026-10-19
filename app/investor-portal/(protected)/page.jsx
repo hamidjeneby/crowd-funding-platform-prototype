@@ -84,14 +84,14 @@ export default async function InvestorDashboardPage() {
 
     const pledges = pledgesData || [];
 
-    // Stat card 1: Total Capital Deployed: SUM(allocated_amount || pledged_amount) where status IN (allocated, active, completed)
+    // Stat card 1: Total Capital Deployed: SUM(allocated_amount ?? pledged_amount) where status IN (allocated, active, completed)
     const deployedPledges = pledges.filter((p) =>
       ["allocated", "active", "completed"].includes(
         (p.status || "").toLowerCase()
       )
     );
     totalCapitalDeployed = deployedPledges.reduce(
-      (sum, p) => sum + Number(p.allocated_amount || p.pledged_amount || 0),
+      (sum, p) => sum + Number(p.allocated_amount ?? p.pledged_amount ?? 0),
       0
     );
 
@@ -113,7 +113,7 @@ export default async function InvestorDashboardPage() {
     // Active held project IDs for Milestones & Campaigns Closing Soon
     const validHeldPledges = pledges.filter(
       (p) =>
-        !["cancelled", "refunded"].includes((p.status || "").toLowerCase())
+        !["cancelled", "refunded", "rejected_oversubscribed"].includes((p.status || "").toLowerCase())
     );
     const heldProjectIds = Array.from(
       new Set(validHeldPledges.map((p) => p.project_id).filter(Boolean))
@@ -150,14 +150,14 @@ export default async function InvestorDashboardPage() {
       upcomingMilestones = filteredMs.slice(0, 3);
     }
 
-    // 4. Campaigns Closing Soon (held projects closing within 30 days)
+    // 4. Campaigns Closing Soon (held live projects closing within 30 days)
     const now = new Date();
     const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
 
     const closingMap = new Map();
     validHeldPledges.forEach((p) => {
       const proj = p.projects;
-      if (!proj || !proj.campaign_end_date) return;
+      if (!proj || !proj.campaign_end_date || proj.status !== "campaign_live") return;
       const endDate = new Date(proj.campaign_end_date);
       const diff = endDate.getTime() - now.getTime();
       if (diff > -86400000 && diff <= thirtyDaysMs) {

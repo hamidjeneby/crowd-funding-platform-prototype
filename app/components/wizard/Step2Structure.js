@@ -4,7 +4,15 @@ import { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { HelpCircle, ShieldCheck } from "lucide-react";
+import {
+  HelpCircle,
+  ShieldCheck,
+  AlertTriangle,
+  XCircle,
+  CheckCircle2,
+  Clock,
+} from "lucide-react";
+import { updateProjectDraft } from "@/app/actions/projects";
 
 const PREDEFINED_AUTHORITIES = ["DIFC", "ADGM", "LABUAN_IBFC"];
 
@@ -79,15 +87,17 @@ const createSchema = (campaignEndDate) =>
         }
 
         if (data.sharia_contract_type === "spv_equity") {
+          const numShares = Number(data.total_shares_authorized);
           if (
             data.total_shares_authorized === undefined ||
-            isNaN(data.total_shares_authorized) ||
-            data.total_shares_authorized <= 0
+            isNaN(numShares) ||
+            numShares < 1 ||
+            !Number.isInteger(numShares)
           ) {
             ctx.addIssue({
               path: ["total_shares_authorized"],
               message:
-                "Total authorized shares required and must be greater than 0",
+                "Shares offered in this raise is required and must be a whole number of at least 1",
               code: z.ZodIssueCode.custom,
             });
           }
@@ -182,6 +192,13 @@ export default function Step2Structure({
     initialContractType === "spv_equity" ? true : initialData?.is_spv || false;
   const campaignEndDate = initialData?.campaign_end_date;
 
+  const rejectionReason = spvDetail?.rejection_reason?.trim()
+    ? spvDetail.rejection_reason
+    : null;
+  const hasSpvRejection =
+    spvDetail?.spv_detail_verification_status === "rejected" ||
+    Boolean(rejectionReason);
+
   const schema = useMemo(
     () => createSchema(campaignEndDate),
     [campaignEndDate],
@@ -266,7 +283,18 @@ export default function Step2Structure({
       await onUpdate();
       onNext(res);
     } catch (err) {
-      setError(err.message || "Failed to save");
+      console.error("Step 2 save error:", err);
+      const isCodeError =
+        !err?.message ||
+        err.message.includes("is not defined") ||
+        err.message.includes("Cannot read") ||
+        err.name === "ReferenceError" ||
+        err.name === "TypeError";
+      setError(
+        isCodeError
+          ? "Something went wrong while saving. Please try again or contact support."
+          : err.message
+      );
     } finally {
       setLoading(false);
     }
@@ -314,6 +342,17 @@ export default function Step2Structure({
             {errors.sharia_contract_type.message}
           </p>
         )}
+        {initialContractType && shariaContractType && shariaContractType !== initialContractType && (
+          <div className="mt-3 p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs space-y-1 animate-in fade-in">
+            <div className="flex items-center gap-1.5 font-bold text-amber-950">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Repayment Terms Will Be Reset</span>
+            </div>
+            <p className="leading-relaxed font-medium">
+              You changed the contract type from <strong className="capitalize">{initialContractType.replace("_", " ")}</strong> to <strong className="capitalize">{shariaContractType.replace("_", " ")}</strong>. Repayment terms and tenor from the previous contract type will be cleared upon saving, and will need to be re-entered in Step 3.
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center">
@@ -341,9 +380,88 @@ export default function Step2Structure({
         </label>
       </div>
 
+      {/* If SPV was rejected and is not currently selected as SPV, show a notice */}
+      {hasSpvRejection && !isSpv && (
+        <div className="p-4 rounded-xl bg-red-50 border border-red-300 text-red-900 text-xs space-y-2 animate-in fade-in">
+          <div className="flex items-center gap-2 font-bold text-red-950">
+            <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+            <span>SPV Details Rejected by Auditor</span>
+          </div>
+          <p className="text-red-900/90 leading-relaxed font-medium">
+            The previous SPV details for this project were rejected by the auditor. Please check &quot;This project is an SPV&quot; to review the auditor&apos;s rejection feedback and correct your information.
+          </p>
+          {rejectionReason && (
+            <div className="pt-2 border-t border-red-200/80">
+              <span className="font-extrabold uppercase text-[10px] text-red-800 block mb-0.5">
+                Auditor Rejection Reason:
+              </span>
+              <p className="font-semibold text-red-950 bg-red-100/70 p-2.5 rounded-lg border border-red-200/60 whitespace-pre-wrap">
+                {rejectionReason}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {isSpv && (
-        <div className="p-4 border rounded-md bg-gray-50 space-y-4">
-          <h3 className="font-medium text-gray-900">SPV Details</h3>
+        <div
+          className={`p-5 border rounded-2xl space-y-4 transition-colors ${
+            hasSpvRejection
+              ? "border-red-300 bg-red-50/20 shadow-xs"
+              : spvDetail?.spv_detail_verification_status === "approved"
+                ? "border-emerald-300 bg-emerald-50/20"
+                : "border-gray-200 bg-gray-50"
+          }`}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-200/80 pb-3 gap-2">
+            <div>
+              <h3 className="font-bold text-gray-900 text-base">SPV Details</h3>
+              <p className="text-xs text-gray-500">
+                Special Purpose Vehicle corporate registration &amp; jurisdiction
+              </p>
+            </div>
+            <div>
+              {hasSpvRejection ? (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-300 shadow-2xs">
+                  <XCircle className="w-3.5 h-3.5 text-red-600" />
+                  SPV Details Rejected
+                </span>
+              ) : spvDetail?.spv_detail_verification_status === "approved" ? (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  SPV Approved
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                  <Clock className="w-3.5 h-3.5 text-amber-600" />
+                  Pending Verification
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Prominent Rejection Feedback Banner */}
+          {hasSpvRejection && (
+            <div className="p-4 rounded-xl bg-red-50 border border-red-300 text-red-900 space-y-2 animate-in fade-in">
+              <div className="flex items-center gap-2 text-xs font-extrabold text-red-950">
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                <span>Action Required: Auditor SPV Rejection Feedback</span>
+              </div>
+              <p className="text-xs text-red-900/90 leading-relaxed font-medium">
+                The auditor rejected your submitted SPV details. Please review the specific feedback below and update your SPV parameters before resubmitting.
+              </p>
+              {rejectionReason && (
+                <div className="pt-2 border-t border-red-200/80 mt-1">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-red-800 block mb-1">
+                    Auditor Rejection Reason:
+                  </span>
+                  <p className="text-xs font-semibold text-red-950 bg-red-100/80 p-3 rounded-lg border border-red-200 whitespace-pre-wrap">
+                    {rejectionReason}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700">
               Legal Name
@@ -419,10 +537,10 @@ export default function Step2Structure({
           {shariaContractType === "spv_equity" && (
             <div>
               <label className="block text-sm font-medium text-gray-700">
-                Total Authorized Shares <span className="text-red-500">*</span>
+                Shares offered in this raise <span className="text-red-500">*</span>
               </label>
               <p className="text-xs text-gray-500 mb-1">
-                (Maximum number of shares that can be distributed)
+                (Total number of shares being offered to investors in this campaign raise)
               </p>
               <input
                 type="number"
@@ -477,6 +595,9 @@ export default function Step2Structure({
               <h4 className="font-medium text-sm text-gray-900">
                 Conversion Terms
               </h4>
+              <p className="text-xs text-blue-700 bg-blue-50/80 p-2.5 rounded-lg border border-blue-200/60 leading-relaxed font-medium">
+                Units that convert to shares stop receiving scheduled payments from the conversion date.
+              </p>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700">

@@ -146,7 +146,7 @@ export default function Step5Media({
 
     const mediaType = file.type.startsWith("video/") ? "video" : "image";
     const newItem = {
-      media_id: `staged_${Date.now()}`,
+      media_id: `staged_${file.lastModified || 0}_${file.size}_${idx}`,
       url: URL.createObjectURL(file),
       media_type: mediaType,
       file,
@@ -291,7 +291,18 @@ export default function Step5Media({
       await onUpdate();
       onNext(res);
     } catch (err) {
-      setError(err.message);
+      console.error("Step 5 save error:", err);
+      const isCodeError =
+        !err?.message ||
+        err.message.includes("is not defined") ||
+        err.message.includes("Cannot read") ||
+        err.name === "ReferenceError" ||
+        err.name === "TypeError";
+      setError(
+        isCodeError
+          ? "Something went wrong while saving. Please try again or contact support."
+          : err.message
+      );
       setUploading(false);
     }
   };

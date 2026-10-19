@@ -43,8 +43,8 @@ function ProjectWizardPage() {
         const token = await getToken({ template: "supabase" });
         const supabase = createClerkSupabaseClient(token);
 
-        // Fetch project and related data by slug
-        const { data: project, error: pError } = await supabase
+        // Fetch project and related data by slug or numeric id
+        let query = supabase
           .from("projects")
           .select(`
             *,
@@ -52,9 +52,15 @@ function ProjectWizardPage() {
             project_docs (*),
             project_media (*),
             project_milestones (*)
-          `)
-          .eq("slug", slug)
-          .maybeSingle();
+          `);
+
+        if (!isNaN(Number(slug))) {
+          query = query.or(`id.eq.${slug},slug.eq.${slug}`);
+        } else {
+          query = query.eq("slug", slug);
+        }
+
+        const { data: project, error: pError } = await query.maybeSingle();
 
         if (pError) throw pError;
         if (!project) throw new Error("Project not found");
@@ -70,6 +76,11 @@ function ProjectWizardPage() {
         }
 
         setProjectData(project);
+
+        // If accessed by numeric ID or an old slug, replace URL with current canonical slug
+        if (project.slug && project.slug !== slug) {
+          router.replace(`/issuer-portal/projects/${project.slug}/edit`, { scroll: false });
+        }
       } catch (err) {
         console.error("Failed to load project:", err);
         setError("Failed to load project data. You may not have permission.");
@@ -79,9 +90,12 @@ function ProjectWizardPage() {
     }
 
     loadProject();
-  }, [isLoaded, userId, slug, getToken]);
+  }, [isLoaded, userId, slug, getToken, router]);
 
   const handleNext = (res) => {
+    if (res?.slug && res.slug !== slug) {
+      router.replace(`/issuer-portal/projects/${res.slug}/edit`, { scroll: false });
+    }
     const targetStep = res?.current_step || Math.max(maxReachedStep, currentStep + 1);
     setMaxReachedStep((prev) => Math.max(prev, targetStep));
     setCurrentStep(targetStep);
@@ -92,13 +106,15 @@ function ProjectWizardPage() {
       setCurrentStep(stepIndex);
     }
   };
-  const reloadData = async () => {
-    if (!slug) return;
+  const reloadData = async (overrideSlugOrId) => {
+    const lookupTarget = overrideSlugOrId || projectData?.id || slug;
+    if (!lookupTarget) return;
     setLoading(true);
     try {
       const token = await getToken({ template: "supabase" });
       const supabase = createClerkSupabaseClient(token);
-      const { data: project } = await supabase
+
+      let query = supabase
         .from("projects")
         .select(`
           *,
@@ -106,15 +122,27 @@ function ProjectWizardPage() {
           project_docs (*),
           project_media (*),
           project_milestones (*)
-        `)
-        .eq("slug", slug)
-        .maybeSingle();
-      setProjectData(project);
-      if (project?.current_step) {
-        setMaxReachedStep((prev) => Math.max(prev, project.current_step));
+        `);
+
+      if (typeof lookupTarget === "number" || !isNaN(Number(lookupTarget))) {
+        query = query.or(`id.eq.${lookupTarget},slug.eq.${lookupTarget}`);
+      } else {
+        query = query.eq("slug", lookupTarget);
+      }
+
+      const { data: project, error: pError } = await query.maybeSingle();
+      if (pError) throw pError;
+      if (project) {
+        setProjectData(project);
+        if (project.slug && project.slug !== slug) {
+          router.replace(`/issuer-portal/projects/${project.slug}/edit`, { scroll: false });
+        }
+        if (project.current_step) {
+          setMaxReachedStep((prev) => Math.max(prev, project.current_step));
+        }
       }
     } catch (e) {
-      console.error(e);
+      console.error("Failed to reload project data:", e);
     } finally {
       setLoading(false);
     }

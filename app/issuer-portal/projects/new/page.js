@@ -22,7 +22,18 @@ export default function NewProjectPage() {
       const projectResult = await createProjectDraft(title);
       router.push(`/issuer-portal/projects/${projectResult.slug}/edit`);
     } catch (err) {
-      setError(err.message || "Failed to create project");
+      console.error("Project draft creation error:", err);
+      const isCodeError =
+        !err?.message ||
+        err.message.includes("is not defined") ||
+        err.message.includes("Cannot read") ||
+        err.name === "ReferenceError" ||
+        err.name === "TypeError";
+      setError(
+        isCodeError
+          ? "Something went wrong while creating the project. Please try again or contact support."
+          : err.message
+      );
       setLoading(false);
     }
   };

@@ -1,7 +1,11 @@
 import { notFound } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { getInvestorFacingProjectData } from "@/app/actions/marketplace";
+import {
+  getInvestorFacingProjectData,
+  getProjectClassBandSubscription,
+  getProjectConversionDemand,
+} from "@/app/actions/marketplace";
 import ProjectDetailView from "@/app/components/projects/ProjectDetailView";
 
 export async function generateMetadata({ params }) {
@@ -55,12 +59,25 @@ export default async function IssuerProjectPreviewPage({ params }) {
     notFound();
   }
 
-  // Fetch the exact same investor-facing data model
-  const projectData = await getInvestorFacingProjectData(projectRow.slug || slug);
+  const effectiveSlug = projectRow.slug || slug;
+
+  // Fetch the exact same investor-facing data model plus band aggregates
+  const [projectData, classBandSubscription, conversionDemand] = await Promise.all([
+    getInvestorFacingProjectData(effectiveSlug),
+    getProjectClassBandSubscription(effectiveSlug, 1),
+    getProjectConversionDemand(effectiveSlug, 1),
+  ]);
 
   if (!projectData) {
     notFound();
   }
 
-  return <ProjectDetailView project={projectData} viewerRole="issuer_preview" />;
+  return (
+    <ProjectDetailView
+      project={projectData}
+      viewerRole="issuer_preview"
+      classBandSubscription={classBandSubscription}
+      conversionDemand={conversionDemand}
+    />
+  );
 }

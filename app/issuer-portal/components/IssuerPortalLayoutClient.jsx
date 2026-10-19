@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
 import Sidebar from "./Sidebar";
+import IssuerToastNotificationStack from "./IssuerToastNotificationStack";
 import {
   Building2,
   Plus,
@@ -150,6 +151,7 @@ export default function IssuerPortalLayoutClient({
   if (normalized.includes("pending")) {
     return (
       <div className="min-h-screen bg-[#fcfaf7] flex items-center justify-center p-6 text-[#064e3b]">
+        <IssuerToastNotificationStack />
         <div className="max-w-md w-full bg-white rounded-3xl p-8 border border-amber-200 shadow-xl text-center space-y-6">
           <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto">
             <Clock className="w-8 h-8 animate-spin" />
@@ -174,12 +176,14 @@ export default function IssuerPortalLayoutClient({
     if (pathname === "/issuer-portal/onboarding") {
       return (
         <div className="flex min-h-screen">
+          <IssuerToastNotificationStack />
           <div className="flex-1 overflow-x-hidden">{children}</div>
         </div>
       );
     }
     return (
       <div className="min-h-screen bg-[#fcfaf7] flex items-center justify-center p-6 text-[#064e3b]">
+        <IssuerToastNotificationStack />
         <div className="max-w-md w-full bg-white rounded-3xl p-8 border border-emerald-200 shadow-xl text-center space-y-6">
           <div className="w-16 h-16 rounded-full bg-emerald-100 text-[#059669] flex items-center justify-center mx-auto">
             <Building2 className="w-8 h-8" />
@@ -211,6 +215,7 @@ export default function IssuerPortalLayoutClient({
   // Approved / Completed: Render full portal with sidebar layout
   return (
     <div className="flex min-h-screen">
+      <IssuerToastNotificationStack />
       <Sidebar />
       <div className="flex-1 overflow-x-hidden">{children}</div>
     </div>

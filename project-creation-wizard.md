@@ -267,6 +267,12 @@ The wizard consists of 6 sequential steps located in [app/components/wizard/](fi
   - If `conversion_deadline` is set and `campaign_end_date` exists, `conversion_deadline` MUST be strictly after `campaign_end_date`.
   - If `convDate <= campaignDate`, Zod refines with inline error:
     > *"The conversion deadline must be after the campaign end date. Please choose a conversion deadline after the campaign end date."*
+- **SPV Rejection Feedback & Status Presentation**:
+  - When a project is sent back by an auditor with rejected SPV details (`spv_details.rejection_reason` is populated or `spv_detail_verification_status = 'rejected'`), Step 2 displays:
+    - An **"SPV Details Rejected"** status badge in the header with a red border (`bg-red-100 text-red-800 border-red-300`).
+    - A highlighted red alert container (`border-red-300 bg-red-50/20`).
+    - An **Auditor Rejection Reason** banner displaying the exact feedback note entered by the auditor.
+    - If `is_spv` is unchecked, a notification prompts the issuer to enable SPV to review and correct the rejected details.
 - **Backend Action**: `updateProjectDraft(projectId, data, step: 2)` updates `projects.sharia_contract_type`, `unit_type`, and upserts `spv_details`.
 
 ---
@@ -285,14 +291,62 @@ The wizard consists of 6 sequential steps located in [app/components/wizard/](fi
   - **Campaign Deadline (`campaign_end_date`)**:
     - HTML `datetime-local` input (e.g. `2027-12-31T21:00`).
     - **UTC Rule**: Input values are assumed to be in UTC directly! Saved via `parseAsUtcIso` as `2027-12-31T21:00:00.000Z` without local offset adjustment.
-  - **Yield Type**: `rental`, `profit_margin`, or `equity_appreciation` (locked to `equity_appreciation` for `spv_equity`).
-  - **Expected ROI %**: Annual target ROI (hidden for `spv_equity`).
-  - **Clearing Option**: `platform_clearing` or `custody_provider_clearing`.
-- **Validation Rules**:
-  - `soft_cap <= target_goal <= hard_cap`.
-  - Minimum Target Goal requirement for conversion clause: `target_goal >= Total Cost Authorized = (unit_price / conversion_ratio_shares) * total_shares_authorized`.
-  - Campaign End Date vs Conversion Deadline check: `campaign_end_date` cannot be later than or equal to `conversion_deadline`. If invalid, displays inline error:
-    > *"The campaign end date cannot be later than the conversion deadline. Please go back to Step 2 to change the conversion deadline or choose an earlier campaign end date."*
+  - **Yield Type**: Derived automatically from `sharia_contract_type` and strictly enforced on server:
+    - `murabaha`: `profit_margin` ("Profit Margin")
+    - `ijara`: `rental` ("Rental Yield")
+    - `mudarabah`: `profit_margin` ("Profit Margin")
+    - `spv_equity`: `equity_appreciation` ("Equity Appreciation")
+    - Displayed as a read-only informational card with explanation, not an editable dropdown.
+  - **Expected ROI % (Contract-specific labels & helpers)**:
+    - `murabaha`: *"Annual profit rate (%)"* (Helper: *"The rate investors are contractually owed."*)
+    - `ijara`: *"Annual rental yield (%)"* (Helper: *"The rate investors are contractually owed."*)
+    - `mudarabah`: *"Target annual return (%), not guaranteed"* (Helper: *"A target only. Actual returns depend on profit and can be zero."*)
+    - `spv_equity`: Hidden completely.
+  - **Campaign Deadline (`campaign_end_date`)**:
+    - HTML `datetime-local` input labeled with `(UTC)`.
+    - **Hourly Restriction**: Minutes and seconds must be `00` (`step="3600"`), enforced on both client and server Zod schemas.
+  - **Repayment Terms (`projects.tenor_months` & `projects.contract_terms`)**:
+    - Shown conditionally based on `sharia_contract_type`.
+    - If `sharia_contract_type` is modified in Step 2, `tenor_months` and `contract_terms` are cleared to null on save with an alert banner warning the issuer.
+    - **Murabaha**:
+      - `tenor_months`: Whole integer 1–120 (required).
+      - `payment_frequency`: `'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'at_maturity'`.
+      - `principal_repayment`: `'with_instalments' | 'at_maturity'`.
+      - `asset_description`: String, 10–500 characters (what is being purchased/financed).
+    - **Ijara**:
+      - `tenor_months`: Whole integer 1–120 (required).
+      - `payment_frequency`: `'monthly' | 'quarterly' | 'semi_annual' | 'annual'` (rental payment schedule; `'at_maturity'` not allowed).
+      - `asset_description`: String, 10–500 characters (leased asset).
+      - `asset_value`: Positive number (> 0) in project's currency; must be `>= target_goal`.
+      - `end_of_term`: `'sale_to_issuer' | 'sale_to_third_party' | 'return_asset'`.
+      - `end_of_term_price`: Positive number (> 0); required when `end_of_term === 'sale_to_issuer'`, optional otherwise.
+    - **Mudarabah**:
+      - `tenor_months`: Whole integer 1–120 (required).
+      - `investor_profit_share_percent`: Number > 0 and < 100 (the issuer retains the remaining `100 - X%`).
+      - `profit_reporting_frequency`: `'monthly' | 'quarterly' | 'semi_annual' | 'annual'`.
+    - **SPV Equity**:
+      - `tenor_months`: Must be `null`.
+      - `existing_shares_outstanding`: Whole integer >= 0 (required).
+      - `voting_rights`: Boolean (optional, defaults to false).
+      - `dividend_policy`: `'none_planned' | 'discretionary' | 'target_payout'` (optional).
+      - `target_exit_horizon_years`: Integer 1–30 (optional).
+  - **Validation Rules**:
+    - `soft_cap <= target_goal <= hard_cap`.
+    - **Term Divisibility Rule**: `tenor_months` must be an exact multiple of the period frequency (monthly: 1, quarterly: 3, semi_annual: 6, annual: 12). Applies to `payment_frequency` and `profit_reporting_frequency`; `'at_maturity'` is exempt. Error: *"The term must be a whole number of payment periods. Choose a term that fits the frequency."*
+    - **Ijara Asset Value**: `asset_value >= target_goal`. Error: *"The asset value must cover the amount you are raising."*
+    - **Conversion Deadline vs. Tenor**: When conversion is enabled on Sukuk projects, `conversion_deadline` must fall strictly before the estimated maturity `addMonthsUtc(campaign_end_date, tenor_months)`. Error: *"The conversion deadline must be before the estimated maturity date (campaign end date + tenor). Please choose an earlier conversion deadline in Step 2 or extend the tenor."*
+    - **Conversion Cessation Notice**: *"Units that convert to shares stop receiving scheduled payments from the conversion date."*
+    - **Hourly UTC Deadlines**: Minutes and seconds on `campaign_end_date` must be `00`.
+- **Display Locations**:
+  - `ProjectDetailView.jsx`: Shared investor portal page and issuer preview modal. Displays dynamic ROI labels, tenor badges, and a comprehensive Repayment Terms card.
+  - `Step6Preview.js`: Review & Submit step in wizard. Shows tenor and dedicated Repayment Terms breakdown.
+  - `OverviewTab.jsx`: Project management overview in the issuer portal. Summarizes tenor and repayment terms.
+  - `ProjectDetailReviewClient.jsx`: Auditor review console. Displays read-only tenor metric and Sharia repayment/exit sub-panel.
+- **Downstream Payloads**:
+  - `sendSubscriptionAgreementWebhook` (`app/actions/pledge.js`): Sends `tenor_months` and `contract_terms` inside the `project` payload object to Make.com.
+  - `triggerMakeWebhook` (`app/actions/projects.js`): AI Project Review webhook only transmits `{ type: "project_review", project_id: projectId }`.
+- **Out of Scope (Deferred to Future Milestones)**:
+  - Payment schedule generation, distributions, fund release flow, asset evidence uploads, profit reporting execution, and conversion payout logic are not yet implemented.
 - **Automatic System Milestones Synchronization**:
   - `ensureSystemMilestonesExist(projectId, campaignEndDateIso)` automatically creates/updates system milestones:
     - `campaign_live`: Initial live launch milestone.
@@ -328,7 +382,11 @@ The wizard consists of 6 sequential steps located in [app/components/wizard/](fi
 - **Submission Action (`submitProjectForReview`)**:
   - Executes comprehensive completeness checks across text fields, financial terms, mandatory document types, and media.
   - If any required field is missing, returns `{ success: false, missingFields: [...] }`.
-  - Upon validation pass, updates `projects.status = "pending_review"`.
+  - Upon validation pass:
+    - Updates `projects.status = "pending_review"` and clears `projects.review_notes = null`.
+    - Updates `projects.shariah_compliance_status = "pending"` unless it was already `"approved"` (in which case it stays `"approved"` since SPV and project details were locked against edits).
+    - If `shariah_compliance_status !== 'approved'`, resets `spv_details.spv_detail_verification_status = "pending"` and clears `spv_details.rejection_reason = null`. If already approved, keeps `spv_detail_verification_status = "approved"` and ensures `rejection_reason = null`.
+    - Triggers the webhook notification for project review.
 
 ---
 

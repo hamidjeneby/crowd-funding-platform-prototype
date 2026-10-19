@@ -20,8 +20,8 @@ commercial/cosmetic feature, but carries no access-control meaning today.
 | 6 | AED 200,000 | Live campaigns > AED 10M only | 1.0% | No | No | — |
 | 7 | AED 50,000 | Live campaigns > AED 15M only | 1.2% | No | No | — |
 | 8 | AED 10,000 | Live campaigns > AED 20M only | 1.5% | No | No | — |
-| 9 | AED 2,000 | Single campaign per quarter | 2.0% | No | No | Retail with higher risk awareness |
-| 10 | AED 500 | Single campaign per quarter, max one active pledge at a time | 2.5% | No | No | General public |
+| 9 | AED 2,000 | Live campaigns > AED 20M only, single campaign per quarter | 2.0% | No | No | Retail with higher risk awareness |
+| 10 | AED 500 | Live campaigns > AED 20M only, single campaign per quarter, max one active pledge at a time | 2.5% | No | No | General public |
 
 ---
 
@@ -82,29 +82,27 @@ commercial/cosmetic feature, but carries no access-control meaning today.
   - Class 3 — capped at AED 500,000 conversion value
   - Class 4 — capped at AED 250,000 conversion value
 - **The trigger price, conversion ratio, and deadline are proposed by the issuer but finalized by compliance/Sharia review** before the campaign goes live — never accepted as raw, unreviewed issuer input, since these terms directly affect fairness and Sharia compliance. Once a campaign is live and investors have pledged against the published terms, they're locked.
-- **Shared conversion pool & Live Pledge Allocation:** `total_shares_authorized` on `spv_details` sets a hard ceiling on total shares the project can ever hand out via conversion. Each pledge's `conversion_eligible_units` is calculated live at pledge time and recorded on the `pledges` table according to the exact algorithm:
-  1. **Eligibility Check:** Must not be `spv_equity`, must have `conversion_enabled = true` on `spv_details`, and investor must be Class 1–4. If Class 5–10, `conversion_eligible_units = 0`.
-  2. **Remaining Share Pool Capacity:**
-     $$\text{remaining\_shares\_capacity} = \text{total\_shares\_authorized} - \left( \text{conversion\_ratio\_shares} \times \sum_{\text{pledges for project}} \text{conversion\_eligible\_units} \right)$$
-     If $\text{remaining\_shares\_capacity} \le 0$, then `conversion_eligible_units = 0`.
-  3. **Class Conversion Value Cap:**
-     - Class 1: Unlimited
-     - Class 2: AED 1,000,000
-     - Class 3: AED 500,000
-     - Class 4: AED 250,000
-  4. **Effective Conversion Amount:** $\min(\text{pledged\_amount}, \text{class\_conversion\_cap})$.
-  5. **Raw Calculated Conversion Shares:**
-     $$\text{raw\_calculated\_shares} = \left\lfloor \frac{\text{effective\_amount}}{\text{unit\_price}} \right\rfloor \times \text{conversion\_ratio\_shares}$$
-  6. **Final Convertible Units (Sukuk Units):**
-     $$\text{assigned\_shares} = \min(\text{raw\_calculated\_shares}, \text{remaining\_shares\_capacity})$$
-     $$\text{conversion\_eligible\_units} = \left\lfloor \frac{\text{assigned\_shares}}{\text{conversion\_ratio\_shares}} \right\rfloor$$
+- **Priority-Based Conversion Allocation (replacing first-come-first-served):** 
+  `total_shares_authorized` on `spv_details` sets a hard ceiling on total shares the project can ever hand out via conversion, corresponding to a conversion pool ceiling of $\lfloor \text{total\_shares\_authorized} / \text{conversion\_ratio\_shares} \rfloor$ Sukuk units.
+  Under the **request, then allocate** model, conversion pool units are **NOT** consumed first-come-first-served during the live campaign. Instead:
+  1. **At Pledge Time:** Pledges by Class 1–4 investors record their **requested demand** on `pledges.requested_conversion_units`:
+     $$\text{effective\_amount} = \min(\text{pledged\_amount}, \text{class\_conversion\_cap})$$
+     $$\text{requested\_conversion\_units} = \left\lfloor \frac{\text{effective\_amount}}{\text{unit\_price}} \right\rfloor$$
+     The field `pledges.conversion_eligible_units` remains `null` while the campaign is live.
+  2. **At Campaign Close (`lib/closing/conversion.js`):** If total requested conversion units exceed the pool capacity, units are allocated in a single deterministic allocation run according to the platform priority hierarchy:
+     - **Criterion 1 (Investor Class):** Class 1 has highest priority, followed by Class 2, Class 3, and Class 4.
+     - **Criterion 2 (Pledge Amount):** Larger pledges within the same class are allocated before smaller pledges.
+     - **Criterion 3 (Pledge Timestamp):** Earliest `pledged_at` timestamps break any remaining ties.
+  3. For each allocated Class 1–4 pledge in rank order, `conversion_eligible_units = min(requested_conversion_units, allocated_units, pool_units_remaining)`, and `pool_units_remaining` is decremented accordingly. If a partial fill reduced `allocated_units` below `requested_conversion_units`, `conversion_eligible_units` is automatically capped at `allocated_units`. See [project-closing.md](file:///Users/marchakimmwai/Desktop/unoffical-projects/crowd-funding-platform-prototype/project-closing.md) for full details.
 - **`hard_cap` relationship to shares differs by contract type:**
-  - **SPV Equity:** `hard_cap` ≤ `total_shares_authorized × unit_price` (and `target_goal` is auto-calculated from the same formula) — every AED raised directly buys a share, so there's no room for oversell.
+  - **SPV Equity:** `hard_cap` ≤ `total_shares_authorized × unit_price` (and `target_goal` is auto-calculated from the same formula) — every AED raised directly buys a share, so there's no room for oversell. At campaign close, `lib/closing/types/spv_equity.js` also calculates each allocated pledge's `ownership_percentage = allocated_units / (existing_shares_outstanding + total_allocated_shares) × 100`.
   - **Conversion-enabled non-equity Sukuk:** `hard_cap` is *not* bounded by the share pool in the same direct way, because Classes 5–10 money never touches the conversion pool at all — only Class 1–4 pledges compete for it, so the total raise can exceed what the reserved shares could back in the worst case, without over-promising, since most classes have zero conversion rights to begin with.
 
 ---
 
 ## 7. Underwriting rules
+
+> **Current Implementation Note:** In the live campaign closing pipeline (`lib/closing/allocate.js`), `applyUnderwriting(project, shortfall)` is currently implemented as a stub returning `0`. When `allocated_total < soft_cap`, the campaign closes as `failed` with `failure_reason = 'soft_cap_not_met'`. The rules below specify the target underwriting syndicate mechanics.
 
 - **Class 1 only.** No other class is eligible to underwrite, given the financial capacity and trust required.
 - **Opt-in, paid feature for the issuer** — `underwriter_mode_enabled` is set by the issuer at project creation, and only takes effect if they've paid for the service.
@@ -138,6 +136,7 @@ commercial/cosmetic feature, but carries no access-control meaning today.
 - Conversion clause is unavailable (see §6) — the "enable conversion" option is not shown at all when this contract type is selected.
 - `hard_cap` and `target_goal` are both derived from `total_shares_authorized × unit_price`, not entered independently.
 - `is_spv = true` is enforced automatically and cannot be unchecked when this contract type is selected — SPV Equity requires an SPV to exist by definition.
+- **Investor Eligibility:** Strictly restricted to Class 1 through Class 4 investors only. Lower-class investors (Classes 5–10) are automatically not eligible to view or pledge into SPV Equity projects.
 
 ---
 
@@ -145,10 +144,11 @@ commercial/cosmetic feature, but carries no access-control meaning today.
 
 | Field | Table | Purpose |
 |---|---|---|
-| `investor_class` | `investor_profiles` | Current class, reviewer-assigned |
+| `investor_class` | `investors` | Current class, reviewer-assigned |
 | `investor_class_at_pledge` | `pledges` | Frozen snapshot at time of pledge |
 | `fee_percent_at_pledge` | `pledges` | Frozen fee rate at time of pledge |
-| `conversion_eligible_units` | `pledges` | Actual convertible portion (in Sukuk units), calculated at pledge time |
+| `requested_conversion_units` | `pledges` | Requested convertible portion (Sukuk units), computed at pledge time |
+| `conversion_eligible_units` | `pledges` | Officially allocated convertible portion, determined at campaign close allocation |
 | `redeemed_at` | `pledges` | Timestamp when pledge maturity/redemption is settled; feeds upgrade eligibility |
 | `total_shares_authorized` | `spv_details` | Ceiling on all shares a project can ever issue/convert |
 | `underwriter_mode_enabled` | `projects` / `financial_terms` | Issuer's paid opt-in for underwriting |

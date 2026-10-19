@@ -4,6 +4,17 @@ import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/utils/crypto";
+import {
+  notifyInvestorOnboardingDecision,
+  notifyInvestorBankVerificationDecision,
+} from "./notifications";
+import {
+  notifyIssuerKybDecision,
+  notifyIssuerBankDecision,
+  notifyIssuerMilestoneDecision,
+  notifyIssuerProjectDecision,
+  notifyIssuerShariahCompliance,
+} from "./issuer-notifications";
 
 /**
  * Helper to generate signed URLs for storage objects
@@ -848,6 +859,9 @@ export async function submitAuditorDecision({
       .eq("entity_type", "investor_onboarding")
       .eq("entity_id", numId);
 
+    // Notify investor on review completion
+    await notifyInvestorOnboardingDecision(numId, decision, rejectionReason);
+
     revalidatePath("/auditor-portal");
     revalidatePath(`/auditor-portal/case/investor/${numId}`);
     return { success: true };
@@ -927,6 +941,9 @@ export async function submitAuditorDecision({
         .eq("entity_type", "issuer_document_review")
         .in("entity_id", docIds);
     }
+
+    // Notify issuer of KYB decision
+    await notifyIssuerKybDecision(numId, decision, rejectionReason);
 
     revalidatePath("/auditor-portal");
     revalidatePath(`/auditor-portal/case/issuer/${numId}`);
@@ -1023,6 +1040,9 @@ export async function submitAuditorDecision({
       .eq("entity_type", "project_min_visibility_class_review")
       .eq("entity_id", numId);
 
+    // Notify issuer of project proposal review decision
+    await notifyIssuerProjectDecision(numId, decision, rejectionReason);
+
     revalidatePath("/auditor-portal");
     revalidatePath(`/auditor-portal/case/project/${numId}`);
     return { success: true };
@@ -1034,7 +1054,7 @@ export async function submitAuditorDecision({
   if (type === "milestone") {
     const { data: milestone } = await supabaseAdmin
       .from("project_milestones")
-      .select("id, status")
+      .select("id, project_id, status")
       .eq("id", numId)
       .single();
 
@@ -1043,10 +1063,6 @@ export async function submitAuditorDecision({
     const updatePayload = {
       verification_status: decision,
     };
-
-    if (decision === "approved") {
-      updatePayload.status = "completed";
-    }
 
     const { error: mErr } = await supabaseAdmin
       .from("project_milestones")
@@ -1065,6 +1081,9 @@ export async function submitAuditorDecision({
       })
       .eq("entity_type", "milestone_review")
       .eq("entity_id", numId);
+
+    // Notify issuer of milestone verification decision
+    await notifyIssuerMilestoneDecision(numId, decision, rejectionReason);
 
     revalidatePath("/auditor-portal");
     revalidatePath(`/auditor-portal/case/milestone/${numId}`);
@@ -1336,6 +1355,9 @@ export async function updateInvestorBankDecision({ investorId, decision }) {
     return { success: false, error: error.message };
   }
 
+  // Notify investor of bank verification decision
+  await notifyInvestorBankVerificationDecision(investorId, decision);
+
   revalidatePath(`/auditor-portal/investor-onboarding/${investorId}`);
   return { success: true };
 }
@@ -1481,6 +1503,9 @@ export async function submitInvestorFinalOnboardingDecision({ investorId, decisi
   if (error) {
     return { success: false, error: error.message };
   }
+
+  // Notify investor of onboarding completion decision
+  await notifyInvestorOnboardingDecision(investorId, decision, reviewNotes);
 
   revalidatePath("/auditor-portal/investor-onboarding");
   revalidatePath(`/auditor-portal/investor-onboarding/${investorId}`);
@@ -1702,6 +1727,9 @@ export async function updateIssuerBankDecision({ issuerId, decision }) {
     return { success: false, error: error.message };
   }
 
+  // Notify issuer of bank verification decision
+  await notifyIssuerBankDecision(issuerId, decision);
+
   revalidatePath("/auditor-portal/issuer-onboarding");
   revalidatePath(`/auditor-portal/issuer-onboarding/${issuerId}`);
   return { success: true };
@@ -1768,6 +1796,9 @@ export async function submitIssuerFinalOnboardingDecision({ issuerId, decision, 
   if (error) {
     return { success: false, error: error.message };
   }
+
+  // Notify issuer of final onboarding/KYB review decision
+  await notifyIssuerKybDecision(issuerId, decision, reviewNotes);
 
   revalidatePath("/auditor-portal/issuer-onboarding");
   revalidatePath(`/auditor-portal/issuer-onboarding/${issuerId}`);
@@ -1987,6 +2018,13 @@ export async function updateBankVerificationDecision({ entityType, entityId, dec
 
   if (error) {
     return { success: false, error: error.message };
+  }
+
+  // Notify investor if this is an investor bank verification
+  if (entityType === "investor") {
+    await notifyInvestorBankVerificationDecision(numId, decision, rejectionReason);
+  } else if (entityType === "issuer") {
+    await notifyIssuerBankDecision(numId, decision, rejectionReason);
   }
 
   revalidatePath("/auditor-portal/bank-review");
@@ -2404,6 +2442,31 @@ export async function updateProjectMinClassDecision({ projectId, selectedClass }
     return { success: false, error: "Invalid investor class level. Must be between 1 and 10 or null." };
   }
 
+  // Check project structure constraints
+  const { data: proj, error: checkErr } = await supabaseAdmin
+    .from("projects")
+    .select("sharia_contract_type, shariah_compliance_status")
+    .eq("id", projectId)
+    .single();
+
+  if (checkErr || !proj) {
+    return { success: false, error: "Project not found." };
+  }
+
+  if (proj.shariah_compliance_status === "rejected") {
+    return {
+      success: false,
+      error: "Cannot assign minimum investor class: Project is marked as Shariah non-compliant.",
+    };
+  }
+
+  if (proj.sharia_contract_type === "spv_equity" && classNum !== null && classNum > 4) {
+    return {
+      success: false,
+      error: "Projects with SPV Equity structure cannot be assigned an investor class below Class 4 (Classes 5–10 are not eligible).",
+    };
+  }
+
   // Update projects table
   const { error: projErr } = await supabaseAdmin
     .from("projects")
@@ -2478,10 +2541,6 @@ export async function updateMilestoneDecision({ milestoneId, decision, rejection
     verification_status: decision,
   };
 
-  if (decision === "approved") {
-    updatePayload.status = "completed";
-  }
-
   const { error: updateErr } = await supabaseAdmin
     .from("project_milestones")
     .update(updatePayload)
@@ -2519,6 +2578,10 @@ export async function updateMilestoneDecision({ milestoneId, decision, rejection
   revalidatePath("/auditor-portal/milestone-review");
   revalidatePath("/auditor-portal/project-creation");
   revalidatePath(`/auditor-portal/project-creation/${milestone.project_id}`);
+
+  // Notify issuer of milestone decision
+  await notifyIssuerMilestoneDecision(milestoneId, decision, rejectionReason);
+
   return { success: true };
 }
 
@@ -2562,6 +2625,10 @@ export async function submitProjectFinalDecision({ projectId, decision, reviewNo
   revalidatePath("/auditor-portal/project-creation");
   revalidatePath("/auditor-portal/milestone-review");
   revalidatePath(`/auditor-portal/project-creation/${projectId}`);
+
+  // Notify issuer of project proposal decision
+  await notifyIssuerProjectDecision(projectId, decision, reviewNotes);
+
   return { success: true };
 }
 
@@ -2584,6 +2651,20 @@ export async function updateProjectShariahCompliance(formData) {
   let publicUrl = null;
 
   if (decision === "approved") {
+    // Check if SPV details exist and are rejected
+    const { data: spvRecord } = await supabaseAdmin
+      .from("spv_details")
+      .select("id, spv_detail_verification_status")
+      .eq("project_id", numId)
+      .maybeSingle();
+
+    if (spvRecord && spvRecord.spv_detail_verification_status === "rejected") {
+      return {
+        success: false,
+        error: "Cannot approve Shariah compliance: The SPV Legal Structure details are currently marked as rejected.",
+      };
+    }
+
     // Upload certificate file if provided
     if (file && typeof file !== "string" && file.size > 0) {
       const arrayBuffer = await file.arrayBuffer();
@@ -2639,6 +2720,10 @@ export async function updateProjectShariahCompliance(formData) {
   if (publicUrl) {
     updatePayload.shariah_certificate_doc_url = publicUrl;
   }
+  // When rejected/non-compliant, auditor cannot assign a class; clear any existing assignment
+  if (decision === "rejected") {
+    updatePayload.min_eligible_investor_class = null;
+  }
 
   const { error: updateError } = await supabaseAdmin
     .from("projects")
@@ -2648,6 +2733,21 @@ export async function updateProjectShariahCompliance(formData) {
   if (updateError) {
     console.error("[auditor] Error updating project Shariah status:", updateError);
     return { success: false, error: updateError.message };
+  }
+
+  // If approved: Automatically approve SPV details if an SPV record exists for this project
+  if (decision === "approved") {
+    const { error: spvErr } = await supabaseAdmin
+      .from("spv_details")
+      .update({
+        spv_detail_verification_status: "approved",
+        rejection_reason: null,
+      })
+      .eq("project_id", numId);
+
+    if (spvErr) {
+      console.warn("[auditor] Failed to auto-approve SPV details on Shariah approval:", spvErr.message);
+    }
   }
 
   // Best-effort write to shariah_compliance_doc_url if column exists
@@ -2660,6 +2760,11 @@ export async function updateProjectShariahCompliance(formData) {
   revalidatePath("/auditor-portal/project-creation");
   revalidatePath(`/auditor-portal/project-creation/${numId}`);
 
+  // Notify issuer if Shariah certification was approved
+  if (decision === "approved") {
+    await notifyIssuerShariahCompliance(numId);
+  }
+
   const signedDocUrl = publicUrl ? await getSignedUrl("shariah_compliance_docs", publicUrl) : null;
 
   return {
@@ -2667,6 +2772,60 @@ export async function updateProjectShariahCompliance(formData) {
     shariah_compliance_status: decision,
     shariah_certificate_doc_url: publicUrl,
     signedShariahDocUrl: signedDocUrl,
+  };
+}
+
+/**
+ * Updates an SPV's verification status (spv_detail_verification_status: 'approved' | 'rejected') and rejection reason
+ */
+export async function updateProjectSpvDetailsDecision({ projectId, decision, rejectionReason }) {
+  await getAuthenticatedAuditor();
+
+  const numId = Number(projectId);
+  if (!numId || isNaN(numId)) {
+    return { success: false, error: "Invalid project ID." };
+  }
+
+  if (!["approved", "rejected"].includes(decision)) {
+    return { success: false, error: "Invalid decision option. Must be 'approved' or 'rejected'." };
+  }
+
+  if (decision === "rejected" && (!rejectionReason || !rejectionReason.trim())) {
+    return { success: false, error: "Please provide a rejection reason for the SPV details." };
+  }
+
+  const { data: spvRecord, error: fetchErr } = await supabaseAdmin
+    .from("spv_details")
+    .select("id")
+    .eq("project_id", numId)
+    .maybeSingle();
+
+  if (fetchErr || !spvRecord) {
+    return { success: false, error: "SPV record not found for this project." };
+  }
+
+  const updateData = {
+    spv_detail_verification_status: decision,
+    rejection_reason: decision === "rejected" ? rejectionReason.trim() : null,
+  };
+
+  const { error: updateErr } = await supabaseAdmin
+    .from("spv_details")
+    .update(updateData)
+    .eq("project_id", numId);
+
+  if (updateErr) {
+    console.error("[auditor] Error updating SPV details status:", updateErr);
+    return { success: false, error: updateErr.message };
+  }
+
+  revalidatePath("/auditor-portal/project-creation");
+  revalidatePath(`/auditor-portal/project-creation/${numId}`);
+
+  return {
+    success: true,
+    spv_detail_verification_status: decision,
+    rejection_reason: updateData.rejection_reason,
   };
 }
 

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getLiveRaisedAmounts, getLiveConversionTotals } from "./marketplace";
 import { triggerMakeWebhook } from "@/lib/webhook";
+import { notifyInvestorsOnMilestoneCompleted } from "./notifications";
 
 /**
  * Helper to get issuer record by orgId
@@ -98,7 +99,7 @@ export async function getIssuerProjectManagementData(slugOrId) {
       supabaseAdmin
         .from("pledges")
         .select(
-          "id, investor_id, pledged_amount, allocated_amount, investor_class_at_pledge, status",
+          "id, investor_id, pledged_amount, allocated_amount, refunded_amount, investor_class_at_pledge, status",
         )
         .eq("project_id", project.id),
       supabaseAdmin
@@ -114,26 +115,40 @@ export async function getIssuerProjectManagementData(slugOrId) {
     ]);
 
   const allPledges = pledgesRes.data || [];
-  const validPledges = allPledges.filter(
-    (p) => p.status !== "cancelled" && p.status !== "refunded",
+  const nonCancelledPledges = allPledges.filter(
+    (p) => p.status !== "cancelled",
+  );
+  const validPledges = nonCancelledPledges.filter(
+    (p) =>
+      p.status !== "refunded" &&
+      p.status !== "rejected_oversubscribed",
   );
 
-  // Distinct investor count (no PII exposed)
-  const distinctInvestorIds = new Set(
+  // Distinct investor count (no PII exposed).
+  // For failed campaigns where all pledges are refunded, show the distinct investors who pledged before close.
+  const distinctActiveInvestorIds = new Set(
     validPledges.map((p) => p.investor_id).filter(Boolean),
   );
-  const totalInvestorCount = distinctInvestorIds.size;
+  const distinctAllPledgedInvestorIds = new Set(
+    nonCancelledPledges.map((p) => p.investor_id).filter(Boolean),
+  );
+  const totalInvestorCount =
+    project.status === "failed"
+      ? distinctAllPledgedInvestorIds.size
+      : distinctActiveInvestorIds.size;
 
-  // Aggregate positions by investor_class_at_pledge
+  // Aggregate positions by investor_class_at_pledge across all non-cancelled pledges
   const classBreakdown = {};
   const statusCounts = {
     pending: 0,
     allocated: 0,
     active: 0,
     completed: 0,
+    rejected_oversubscribed: 0,
+    refunded: 0,
   };
 
-  validPledges.forEach((p) => {
+  nonCancelledPledges.forEach((p) => {
     const rawClass = p.investor_class_at_pledge || 10;
     const classKey = `Class ${rawClass}`;
     if (!classBreakdown[classKey]) {
@@ -141,8 +156,13 @@ export async function getIssuerProjectManagementData(slugOrId) {
         className: classKey,
         classNum: Number(rawClass) || 10,
         investorIds: new Set(),
+        pledgeCount: 0,
+        allocatedCount: 0,
+        rejectedCount: 0,
+        refundedCount: 0,
         totalPledged: 0,
         totalAllocated: 0,
+        totalRefunded: 0,
         hasAllocatedValues: false,
       };
     }
@@ -150,8 +170,23 @@ export async function getIssuerProjectManagementData(slugOrId) {
     if (p.investor_id) {
       classBreakdown[classKey].investorIds.add(p.investor_id);
     }
+    classBreakdown[classKey].pledgeCount += 1;
     classBreakdown[classKey].totalPledged += Number(p.pledged_amount) || 0;
-    if (p.allocated_amount !== null && p.allocated_amount !== undefined) {
+    classBreakdown[classKey].totalRefunded += Number(p.refunded_amount) || 0;
+
+    if (p.status === "allocated" || p.status === "active" || p.status === "completed") {
+      classBreakdown[classKey].allocatedCount += 1;
+    } else if (p.status === "rejected_oversubscribed") {
+      classBreakdown[classKey].rejectedCount += 1;
+    } else if (p.status === "refunded") {
+      classBreakdown[classKey].refundedCount += 1;
+    }
+
+    if (
+      p.allocated_amount !== null &&
+      p.allocated_amount !== undefined &&
+      p.status !== "pending"
+    ) {
       classBreakdown[classKey].totalAllocated +=
         Number(p.allocated_amount) || 0;
       classBreakdown[classKey].hasAllocatedValues = true;
@@ -166,9 +201,13 @@ export async function getIssuerProjectManagementData(slugOrId) {
     .map((item) => ({
       className: item.className,
       classNum: item.classNum,
-      investorCount: item.investorIds.size,
+      investorCount: item.pledgeCount || item.investorIds.size,
+      allocatedCount: item.allocatedCount,
+      rejectedCount: item.rejectedCount,
+      refundedCount: item.refundedCount,
       totalPledged: item.totalPledged,
       totalAllocated: item.hasAllocatedValues ? item.totalAllocated : null,
+      totalRefunded: item.totalRefunded,
     }))
     .sort((a, b) => a.classNum - b.classNum);
 
@@ -433,6 +472,16 @@ export async function markMilestoneReached(projectId, milestoneId) {
   if (error) {
     console.error("Error marking milestone complete:", error);
     throw new Error("Failed to update milestone status.");
+  }
+
+  // Notify subscribed investors for this milestone completion
+  try {
+    await notifyInvestorsOnMilestoneCompleted(numProjectId, milestoneId);
+  } catch (notifErr) {
+    console.error(
+      "Non-blocking error dispatching milestone notifications:",
+      notifErr,
+    );
   }
 
   revalidatePath("/issuer-portal/projects");
