@@ -7,7 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:pledge": "node --env-file=.env.local scripts/test-pledge-model.mjs"
+    "test:pledge": "node --env-file=.env.local tests/pledge-model/test-pledge-model.mjs",
+    "test:pledge-limits": "node --test tests/pledge-limits/test-pledge-limits.mjs",
+    "test:closing": "node --test tests/campaign-closing/test-closing.mjs",
+    "test:portfolio": "node --test tests/portfolio/test-portfolio-aggregate.mjs",
+    "test:repayments": "node --test tests/repayments/test-calc.mjs"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.6.4",
@@ -21,6 +25,7 @@
     "@tiptap/react": "^3.29.2",
     "@tiptap/starter-kit": "^3.29.2",
     "bcrypt": "^6.0.0",
+    "chart.js": "^4.5.1",
     "country-state-city": "^3.2.1",
     "ibantools": "^4.5.4",
     "isomorphic-dompurify": "^3.19.0",
@@ -28,6 +33,7 @@
     "markdown-it": "^15.0.0",
     "next": "^16.2.12",
     "react": "19.2.4",
+    "react-chartjs-2": "^5.3.1",
     "react-dom": "19.2.4",
     "react-hook-form": "^7.84.0",
     "react-phone-number-input": "^3.4.17",

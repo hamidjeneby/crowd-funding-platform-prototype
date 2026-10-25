@@ -15,6 +15,7 @@ import {
   AlertCircle,
   Sparkles,
   ChevronRight,
+  CalendarClock,
 } from "lucide-react";
 import { getConversionRights } from "@/app/utils/conversion";
 
@@ -55,6 +56,16 @@ function getPledgeStatusBadge(status, pledge = null) {
           : "bg-emerald-100 text-emerald-900 border-emerald-300",
       };
     }
+    case "active":
+      return {
+        label: "Active",
+        className: "bg-emerald-100 text-emerald-900 border-emerald-300",
+      };
+    case "completed":
+      return {
+        label: "Completed",
+        className: "bg-purple-100 text-purple-900 border-purple-300",
+      };
     case "rejected_oversubscribed":
       return {
         label: "Not allocated",
@@ -507,6 +518,31 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                         <div className="text-xs font-bold text-gray-700 mt-1">
                           {formatUtcDate(holding.allocated_at || holding.pledged_at || holding.created_at)}
                         </div>
+                      </div>
+                    </div>
+
+                    {/* Repayments Overview Strip */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-xl bg-emerald-50/60 border border-[#059669]/15 text-xs">
+                      <div className="flex items-center gap-2">
+                        <Coins className="w-4 h-4 text-[#059669]" />
+                        <span className="text-[#064e3b]/70 font-medium">Received so far:</span>
+                        <span className="font-extrabold text-[#064e3b]">
+                          {currency} {Number(holding.received_so_far || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <CalendarClock className="w-4 h-4 text-[#059669]" />
+                        <span className="text-[#064e3b]/70 font-medium">Next payment:</span>
+                        <span className="font-bold text-[#064e3b]">
+                          {holding.next_payment_amount != null && holding.next_payment_due_date ? (
+                            `${currency} ${Number(holding.next_payment_amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} • ${formatUtcDate(holding.next_payment_due_date)}`
+                          ) : holding.next_report_due_date ? (
+                            `Next profit report due ${formatUtcDate(holding.next_report_due_date)}`
+                          ) : (
+                            "—"
+                          )}
+                        </span>
                       </div>
                     </div>
 

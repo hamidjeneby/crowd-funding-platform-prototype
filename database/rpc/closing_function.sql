@@ -1,8 +1,25 @@
 -- =============================================================================
--- Campaign Closing System — Transactional Close Function (closing_function.sql)
--- Run this second in the Supabase SQL Editor after closing_schema.sql.
+-- FILE: database/rpc/closing_function.sql
+-- PURPOSE:
+--   Defines the PostgreSQL RPC functions used by the Campaign Closing Engine:
+--     1. `public.apply_project_close(p_project_id, p_results, p_project)`
+--        Atomically applies calculated pledge allocations, credits wallet refunds,
+--        inserts `wallet_transactions` ledger rows, updates the `projects` row to
+--        `'funded'` or `'failed'`, and completes the `'campaign_funded'` system
+--        milestone inside a single database transaction.
+--     2. `public.claim_overdue_projects_for_closing()`
+--        Atomically claims all expired `'campaign_live'` projects (or stale
+--        `'closing'` projects stuck > 15 minutes) for the batch cron route.
+--     3. `public.claim_single_project_for_closing(p_project_id)`
+--        Atomically claims one specific expired project for the worker route.
+--
+-- HOW TO RUN:
+--   Run this in the Supabase SQL Editor AFTER `database/schema/closing_schema.sql`.
 -- =============================================================================
 
+-- -----------------------------------------------------------------------------
+-- RPC 1: `public.apply_project_close`
+-- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.apply_project_close(
   p_project_id bigint,
   p_results jsonb,
@@ -37,7 +54,8 @@ DECLARE
   v_total_refunded numeric := 0;
   v_rows_affected integer := 0;
 BEGIN
-  -- 1. Lock the project row for this transaction
+  -- Step 1: Acquire a row-level lock (`FOR UPDATE`) on the target project row
+  -- so no concurrent worker can modify or close the same project simultaneously.
   SELECT *
   INTO v_project
   FROM public.projects
@@ -48,7 +66,8 @@ BEGIN
     RAISE EXCEPTION 'Project % not found', p_project_id;
   END IF;
 
-  -- Idempotency guard: if already complete, do nothing
+  -- Idempotency check: if `allocation_status` is already `'complete'`, return
+  -- immediately without re-applying allocations or double-crediting refunds.
   IF v_project.allocation_status = 'complete' THEN
     RETURN jsonb_build_object(
       'already_complete', true,
@@ -58,7 +77,7 @@ BEGIN
     );
   END IF;
 
-  -- 2. Process each pledge result
+  -- Step 2: Iterate over each computed pledge outcome in `p_results` JSONB array
   IF p_results IS NOT NULL AND jsonb_typeof(p_results) = 'array' THEN
     FOR v_item IN SELECT * FROM jsonb_array_elements(p_results)
     LOOP
@@ -75,7 +94,8 @@ BEGIN
       v_ownership_percentage := (v_item->>'ownership_percentage')::numeric;
       v_refunded_amount := COALESCE((v_item->>'refunded_amount')::numeric, 0);
 
-      -- Update pledge only where status is still 'pending'
+      -- Update the pledge row ONLY if its current status is still `'pending'`.
+      -- This prevents overwriting a pledge that was already processed.
       UPDATE public.pledges
       SET
         status = v_pledge_status,
@@ -96,9 +116,9 @@ BEGIN
       IF v_rows_affected > 0 THEN
         v_pledges_updated := v_pledges_updated + 1;
 
-        -- 3. Process refund if refunded_amount > 0
+        -- Step 3: If this pledge has a positive refund (`refunded` or `rejected_oversubscribed`),
+        -- lock the investor row, record a `refund_credit` ledger entry, and credit `wallet_balance`.
         IF v_refunded_amount > 0 AND v_investor_id IS NOT NULL THEN
-          -- Lock the investor row to compute accurate balance_after
           SELECT wallet_balance
           INTO v_current_balance
           FROM public.investors
@@ -108,24 +128,29 @@ BEGIN
           v_new_balance := COALESCE(v_current_balance, 0) + v_refunded_amount;
           v_tx_id := NULL;
 
+          -- Insert `refund_credit` into `wallet_transactions`.
+          -- `ON CONFLICT (pledge_id, type) WHERE pledge_id IS NOT NULL DO NOTHING`
+          -- guarantees a pledge can never be refunded more than once.
           INSERT INTO public.wallet_transactions (
             investor_id,
             pledge_id,
             type,
             amount,
-            balance_after
+            balance_after,
+            reference_code
           )
           VALUES (
             v_investor_id,
             v_pledge_id,
             'refund_credit',
             v_refunded_amount,
-            v_new_balance
+            v_new_balance,
+            'TXN-REF-' || to_char(now() AT TIME ZONE 'UTC', 'YYYYMMDD') || '-' || upper(substring(replace(gen_random_uuid()::text, '-', ''), 1, 6))
           )
           ON CONFLICT (pledge_id, type) WHERE pledge_id IS NOT NULL DO NOTHING
           RETURNING id INTO v_tx_id;
 
-          -- Only increment wallet_balance if the ledger row was newly inserted
+          -- Only increment `investors.wallet_balance` if the ledger row was newly inserted
           IF v_tx_id IS NOT NULL THEN
             UPDATE public.investors
             SET wallet_balance = v_new_balance
@@ -139,7 +164,8 @@ BEGIN
     END LOOP;
   END IF;
 
-  -- 4. Update the project row from p_project
+  -- Step 4: Finalize the `projects` row status ('funded' or 'failed') and mark
+  -- `allocation_status = 'complete'`.
   v_project_status := p_project->>'status';
   IF v_project_status NOT IN ('funded', 'failed') THEN
     RAISE EXCEPTION 'Invalid target project status in apply_project_close: %', v_project_status;
@@ -159,7 +185,8 @@ BEGIN
     closed_at = COALESCE(closed_at, now())
   WHERE id = p_project_id;
 
-  -- 5. If funded, mark the system milestone 'campaign_funded' as complete
+  -- Step 5: If the project succeeded ('funded'), automatically mark its system
+  -- milestone `'campaign_funded'` as `'complete'`.
   IF v_project_status = 'funded' THEN
     UPDATE public.project_milestones
     SET status = 'complete'
@@ -168,7 +195,7 @@ BEGIN
       AND linked_system_event = 'campaign_funded';
   END IF;
 
-  -- 6. Return summary jsonb
+  -- Step 6: Return a structured JSONB summary of all updates performed
   RETURN jsonb_build_object(
     'already_complete', false,
     'project_id', p_project_id,
@@ -184,14 +211,17 @@ BEGIN
 END;
 $$;
 
--- Security: service_role only
+-- Restrict execution of `apply_project_close` to `service_role` only
 REVOKE EXECUTE ON FUNCTION public.apply_project_close(bigint, jsonb, jsonb) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.apply_project_close(bigint, jsonb, jsonb) TO service_role;
 
 -- -----------------------------------------------------------------------------
--- Atomic Claim Helper Functions for Cron & Worker Routes
+-- RPC 2: `public.claim_overdue_projects_for_closing`
 -- -----------------------------------------------------------------------------
-
+-- Atomically transitions all overdue `'campaign_live'` projects (where
+-- `campaign_end_date <= now()`) or stalled `'closing'` projects (where
+-- `allocation_status <> 'complete'` and `closed_at <= now() - interval '15 minutes'`)
+-- into `status = 'closing'` and increments `close_attempts`.
 CREATE OR REPLACE FUNCTION public.claim_overdue_projects_for_closing()
 RETURNS TABLE (
   id bigint,
@@ -233,6 +263,11 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.claim_overdue_projects_for_closing() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.claim_overdue_projects_for_closing() TO service_role;
 
+-- -----------------------------------------------------------------------------
+-- RPC 3: `public.claim_single_project_for_closing`
+-- -----------------------------------------------------------------------------
+-- Atomically claims a single overdue `'campaign_live'` project (or stalled
+-- `'closing'` project) by ID (`p_project_id`) for `/api/internal/close-project`.
 CREATE OR REPLACE FUNCTION public.claim_single_project_for_closing(p_project_id bigint)
 RETURNS TABLE (
   id bigint,
@@ -275,4 +310,3 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.claim_single_project_for_closing(bigint) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.claim_single_project_for_closing(bigint) TO service_role;
-

@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { allocatePledges } from "../lib/closing/allocate.js";
-import { allocateConversionPool } from "../lib/closing/conversion.js";
-import { computeRefunds } from "../lib/closing/refunds.js";
+import { allocatePledges } from "../../lib/closing/allocate.js";
+import { allocateConversionPool } from "../../lib/closing/conversion.js";
+import { computeRefunds } from "../../lib/closing/refunds.js";
 
 function runPurePipeline(project, pledges) {
   const allocationOut = allocatePledges(project, pledges);

@@ -357,30 +357,36 @@ export async function getAuditorQueueData(tab = "pending") {
       (r) => r.entity_type === "milestone_review" && r.reviewed_by === 0
     );
 
+    const autoAiByMilestoneId = new Map();
     for (const autoAi of aiAutoDecidedMilestones) {
       const alreadyAdded = cases.some((c) => c.type === "milestone" && c.id === autoAi.entity_id);
-      if (!alreadyAdded) {
-        const { data: m } = await supabaseAdmin
-          .from("project_milestones")
-          .select("*, projects(title)")
-          .eq("id", autoAi.entity_id)
-          .maybeSingle();
+      if (!alreadyAdded && autoAi.entity_id && !autoAiByMilestoneId.has(autoAi.entity_id)) {
+        autoAiByMilestoneId.set(autoAi.entity_id, autoAi);
+      }
+    }
 
-        if (m) {
-          const projectTitle = m.projects?.title ? `${m.projects.title} — ` : "";
-          cases.push({
-            id: m.id,
-            type: "milestone",
-            title: `${projectTitle}${m.title}`,
-            submittedAt: m.created_at || m.target_date,
-            status: "ai_decided",
-            aiSummary: {
-              confidence: autoAi.confidence_score ?? null,
-              suggestedOutcome: autoAi.final_decision || autoAi.suggested_outcome || null,
-              suggestedClass: null,
-            },
-          });
-        }
+    const missingMilestoneIds = Array.from(autoAiByMilestoneId.keys());
+    if (missingMilestoneIds.length > 0) {
+      const { data: missingMilestones } = await supabaseAdmin
+        .from("project_milestones")
+        .select("*, projects(title)")
+        .in("id", missingMilestoneIds);
+
+      for (const m of missingMilestones || []) {
+        const autoAi = autoAiByMilestoneId.get(m.id);
+        const projectTitle = m.projects?.title ? `${m.projects.title} — ` : "";
+        cases.push({
+          id: m.id,
+          type: "milestone",
+          title: `${projectTitle}${m.title}`,
+          submittedAt: m.created_at || m.target_date,
+          status: "ai_decided",
+          aiSummary: {
+            confidence: autoAi?.confidence_score ?? null,
+            suggestedOutcome: autoAi?.final_decision || autoAi?.suggested_outcome || null,
+            suggestedClass: null,
+          },
+        });
       }
     }
   }
@@ -1213,19 +1219,28 @@ export async function getInvestorOnboardingDetails(investorId) {
     .eq("investor_id", investor.id)
     .order("uploaded_at", { ascending: false });
 
+  const docIds = (docs || []).map((d) => d.id).filter(Boolean);
+  const aiReviewByDocId = new Map();
+
+  if (docIds.length > 0) {
+    const { data: allDocAiResults } = await supabaseAdmin
+      .from("ai_review_results")
+      .select("*")
+      .eq("entity_type", "investor_document_review")
+      .in("entity_id", docIds)
+      .order("created_at", { ascending: false });
+
+    for (const r of allDocAiResults || []) {
+      if (!aiReviewByDocId.has(r.entity_id)) {
+        aiReviewByDocId.set(r.entity_id, r);
+      }
+    }
+  }
+
   const processedDocs = await Promise.all(
     (docs || []).map(async (doc) => {
       const signedUrl = await getSignedUrl("investor_docs", doc.url);
-
-      // Query ai_review_results for this doc: entity_type = 'investor_document_review' & entity_id = doc.id
-      const { data: aiResultList } = await supabaseAdmin
-        .from("ai_review_results")
-        .select("*")
-        .eq("entity_type", "investor_document_review")
-        .eq("entity_id", doc.id)
-        .order("created_at", { ascending: false });
-
-      const aiResult = (aiResultList || [])[0] || null;
+      const aiResult = aiReviewByDocId.get(doc.id) || null;
 
       return {
         ...doc,
@@ -1581,19 +1596,28 @@ export async function getIssuerOnboardingDetails(issuerId) {
     .eq("issuer_id", issuer.id)
     .order("uploaded_at", { ascending: false });
 
+  const docIds = (docs || []).map((d) => d.id).filter(Boolean);
+  const aiReviewByDocId = new Map();
+
+  if (docIds.length > 0) {
+    const { data: allDocAiResults } = await supabaseAdmin
+      .from("ai_review_results")
+      .select("*")
+      .eq("entity_type", "issuer_document_review")
+      .in("entity_id", docIds)
+      .order("created_at", { ascending: false });
+
+    for (const r of allDocAiResults || []) {
+      if (!aiReviewByDocId.has(r.entity_id)) {
+        aiReviewByDocId.set(r.entity_id, r);
+      }
+    }
+  }
+
   const processedDocs = await Promise.all(
     (docs || []).map(async (doc) => {
       const signedUrl = await getSignedUrl("issuer_docs", doc.url);
-
-      // Query ai_review_results for this doc: entity_type = 'issuer_document_review' & entity_id = doc.id
-      const { data: aiResultList } = await supabaseAdmin
-        .from("ai_review_results")
-        .select("*")
-        .eq("entity_type", "issuer_document_review")
-        .eq("entity_id", doc.id)
-        .order("created_at", { ascending: false });
-
-      const aiResult = (aiResultList || [])[0] || null;
+      const aiResult = aiReviewByDocId.get(doc.id) || null;
 
       return {
         ...doc,
@@ -2144,19 +2168,28 @@ export async function getProjectCreationDetails(projectId) {
     .eq("project_id", project.id)
     .order("uploaded_at", { ascending: false });
 
+  const docIds = (docs || []).map((d) => d.id).filter(Boolean);
+  const aiReviewByDocId = new Map();
+  if (docIds.length > 0) {
+    const { data: allDocAiResults } = await supabaseAdmin
+      .from("ai_review_results")
+      .select("*")
+      .eq("entity_type", "project_document_review")
+      .in("entity_id", docIds)
+      .order("created_at", { ascending: false });
+
+    for (const r of allDocAiResults || []) {
+      if (!aiReviewByDocId.has(r.entity_id)) {
+        aiReviewByDocId.set(r.entity_id, r);
+      }
+    }
+  }
+
   const processedDocs = await Promise.all(
     (docs || []).map(async (doc) => {
       const rawUrl = doc.file_url || doc.url;
       const signedUrl = rawUrl ? await getSignedUrl("project_docs", rawUrl) : null;
-
-      const { data: aiResultList } = await supabaseAdmin
-        .from("ai_review_results")
-        .select("*")
-        .eq("entity_type", "project_document_review")
-        .eq("entity_id", doc.id)
-        .order("created_at", { ascending: false });
-
-      const aiResult = (aiResultList || [])[0] || null;
+      const aiResult = aiReviewByDocId.get(doc.id) || null;
 
       return {
         ...doc,
@@ -2178,19 +2211,28 @@ export async function getProjectCreationDetails(projectId) {
     .eq("project_id", project.id)
     .order("display_order", { ascending: true });
 
+  const mediaIds = (media || []).map((m) => m.id).filter(Boolean);
+  const aiReviewByMediaId = new Map();
+  if (mediaIds.length > 0) {
+    const { data: allMediaAiResults } = await supabaseAdmin
+      .from("ai_review_results")
+      .select("*")
+      .eq("entity_type", "project_media_review")
+      .in("entity_id", mediaIds)
+      .order("created_at", { ascending: false });
+
+    for (const r of allMediaAiResults || []) {
+      if (!aiReviewByMediaId.has(r.entity_id)) {
+        aiReviewByMediaId.set(r.entity_id, r);
+      }
+    }
+  }
+
   const processedMedia = await Promise.all(
     (media || []).map(async (m) => {
       const rawUrl = m.url || m.file_url || m.media_url;
       const signedUrl = rawUrl ? await getSignedUrl("project_media", rawUrl) : null;
-
-      const { data: aiResultList } = await supabaseAdmin
-        .from("ai_review_results")
-        .select("*")
-        .eq("entity_type", "project_media_review")
-        .eq("entity_id", m.id)
-        .order("created_at", { ascending: false });
-
-      const aiResult = (aiResultList || [])[0] || null;
+      const aiResult = aiReviewByMediaId.get(m.id) || null;
 
       return {
         ...m,
@@ -2227,6 +2269,23 @@ export async function getProjectCreationDetails(projectId) {
     .eq("project_id", project.id)
     .order("target_date", { ascending: true });
 
+  const milestoneIds = (milestones || []).map((m) => m.id).filter(Boolean);
+  const aiReviewByMilestoneId = new Map();
+  if (milestoneIds.length > 0) {
+    const { data: allMilestoneAiResults } = await supabaseAdmin
+      .from("ai_review_results")
+      .select("*")
+      .eq("entity_type", "milestone_review")
+      .in("entity_id", milestoneIds)
+      .order("created_at", { ascending: false });
+
+    for (const r of allMilestoneAiResults || []) {
+      if (!aiReviewByMilestoneId.has(r.entity_id)) {
+        aiReviewByMilestoneId.set(r.entity_id, r);
+      }
+    }
+  }
+
   const processedMilestones = await Promise.all(
     (milestones || []).map(async (m) => {
       let signedProofUrl = null;
@@ -2235,14 +2294,7 @@ export async function getProjectCreationDetails(projectId) {
         signedProofUrl = await getSignedUrl("project_docs", fileUrl);
       }
 
-      const { data: aiResultList } = await supabaseAdmin
-        .from("ai_review_results")
-        .select("*")
-        .eq("entity_type", "milestone_review")
-        .eq("entity_id", m.id)
-        .order("created_at", { ascending: false });
-
-      const aiResult = (aiResultList || [])[0] || null;
+      const aiResult = aiReviewByMilestoneId.get(m.id) || null;
 
       return {
         ...m,

@@ -338,6 +338,8 @@ export async function getInvestorNotifications(options = {}) {
           "allocation_none",
           "campaign_failed",
           "campaign_closed",
+          "shariah_certificate",
+          "certificate",
         ]);
       } else if (typeFilter === "campaign_alert") {
         query = query.in("type", [

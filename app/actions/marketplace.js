@@ -3,6 +3,15 @@
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { CLASS_CONFIG, MAX_OVERSUBSCRIPTION_PERCENT } from "@/app/constants/classConfig";
+import {
+  getQuarterWindow,
+  QUARTER_COUNTED_STATUSES,
+  OPEN_PLEDGE_STATUSES,
+  OPEN_PLEDGE_LIMIT_CODE,
+  QUARTER_LIMIT_CODE,
+  OPEN_PLEDGE_LIMIT_MESSAGE,
+  formatQuarterLimitMessage,
+} from "@/lib/pledgeLimits";
 import { ensureSystemMilestonesExist } from "./projects";
 
 function checkProjectVisibilityInternal(project, investorClassRaw) {
@@ -162,37 +171,65 @@ export async function getVisibleProjectsQuery(investorClassRaw) {
     getLiveConversionTotals(projectIds),
   ]);
 
-  const projectsWithResolvedUrls = await Promise.all(
-    filteredProjects.map(async (p) => {
-      let coverUrl = p.cover_image_url;
-      if (coverUrl && coverUrl.includes("/cover_img/")) {
-        const urlParts = coverUrl.split("/cover_img/");
-        if (urlParts.length === 2) {
-          const { data: sData } = await supabaseAdmin.storage
-            .from("cover_img")
-            .createSignedUrl(urlParts[1], 3600);
-          if (sData?.signedUrl) {
-            coverUrl = sData.signedUrl;
+  // Batch resolve signed URLs for cover images
+  const coverPathsToSign = [];
+  const projectCoverPathMap = new Map();
+
+  for (const p of filteredProjects) {
+    const rawUrl = p.cover_image_url;
+    if (rawUrl && rawUrl.includes("/cover_img/")) {
+      const parts = rawUrl.split("/cover_img/");
+      if (parts.length === 2 && parts[1]) {
+        const path = parts[1];
+        projectCoverPathMap.set(p.id, path);
+        if (!coverPathsToSign.includes(path)) {
+          coverPathsToSign.push(path);
+        }
+      }
+    }
+  }
+
+  const signedUrlByPath = new Map();
+  if (coverPathsToSign.length > 0) {
+    try {
+      const { data: signedResults, error: sErr } = await supabaseAdmin.storage
+        .from("cover_img")
+        .createSignedUrls(coverPathsToSign, 3600);
+
+      if (!sErr && Array.isArray(signedResults)) {
+        for (const res of signedResults) {
+          if (res?.signedUrl && res?.path) {
+            signedUrlByPath.set(res.path, res.signedUrl);
           }
         }
       }
+    } catch (e) {
+      console.warn("Batch signing cover images failed, using fallback URLs:", e);
+    }
+  }
 
-      let spvDetails = null;
-      if (Array.isArray(p.spv_details) && p.spv_details.length > 0) {
-        spvDetails = p.spv_details[0];
-      } else if (p.spv_details && typeof p.spv_details === "object") {
-        spvDetails = p.spv_details;
-      }
+  const projectsWithResolvedUrls = filteredProjects.map((p) => {
+    let coverUrl = p.cover_image_url;
+    const path = projectCoverPathMap.get(p.id);
+    if (path && signedUrlByPath.has(path)) {
+      coverUrl = signedUrlByPath.get(path);
+    }
 
-      return {
-        ...p,
-        spv_details: spvDetails,
-        cover_image_url: coverUrl,
-        live_raised_amount: raisedTotals[p.id] || 0,
-        live_conversion_units: conversionTotals[p.id] || 0,
-      };
-    })
-  );
+    let spvDetails = null;
+    if (Array.isArray(p.spv_details) && p.spv_details.length > 0) {
+      spvDetails = p.spv_details[0];
+    } else if (p.spv_details && typeof p.spv_details === "object") {
+      spvDetails = p.spv_details;
+    }
+
+    return {
+      ...p,
+      spv_details: spvDetails,
+      cover_image_url: coverUrl,
+      live_raised_amount: raisedTotals[p.id] || 0,
+      live_conversion_units: conversionTotals[p.id] || 0,
+    };
+  });
 
   return projectsWithResolvedUrls;
 }
@@ -482,99 +519,206 @@ export async function getProjectDetailBySlug(slug, investorClassRaw, investorId 
   return getInvestorFacingProjectData(slug);
 }
 
+function buildEligibilityResult(allowed, code = null, message = null) {
+  return {
+    allowed,
+    code,
+    message,
+    eligible: allowed,
+    reason: message,
+  };
+}
+
 /**
- * Checks invest eligibility for a given investor and project
+ * Checks invest eligibility for a given investor and project.
+ * Returns { allowed, code, message } (plus { eligible, reason } aliases).
+ * Single source of truth for open-pledge and quarterly campaign limits.
  */
 export async function checkInvestEligibility(project, investorClassRaw, investorId) {
   if (!project) {
-    return { eligible: false, reason: "Project not found." };
+    return buildEligibilityResult(false, "PROJECT_NOT_FOUND", "Project not found.");
   }
 
-  const classNum = typeof investorClassRaw === "number" ? investorClassRaw : (parseInt(String(investorClassRaw || "").replace(/\D/g, ""), 10) || 10);
+  const resolvedInvestorId = await resolveViewerInvestorId(investorId);
+
+  let effectiveClassRaw = investorClassRaw;
+  if (resolvedInvestorId) {
+    const { data: invRow } = await supabaseAdmin
+      .from("investors")
+      .select("investor_class, onboarding_status")
+      .eq("id", resolvedInvestorId)
+      .maybeSingle();
+
+    if (invRow) {
+      if (
+        invRow.onboarding_status &&
+        !["approved", "completed", "verified", "active"].includes(
+          String(invRow.onboarding_status).toLowerCase()
+        ) &&
+        String(invRow.onboarding_status).toLowerCase() === "incomplete"
+      ) {
+        return buildEligibilityResult(
+          false,
+          "ONBOARDING_INCOMPLETE",
+          "Please complete investor onboarding before pledging."
+        );
+      }
+      if (invRow.investor_class != null) {
+        effectiveClassRaw = invRow.investor_class;
+      }
+    }
+  }
+
+  const classNum =
+    typeof effectiveClassRaw === "number"
+      ? effectiveClassRaw
+      : parseInt(String(effectiveClassRaw || "").replace(/\D/g, ""), 10) || 10;
   const cfg = CLASS_CONFIG[classNum] || CLASS_CONFIG[10];
 
-  // 1. Status Check
+  // 1. Campaign Open Check
   if (project.status !== "campaign_live") {
-    return {
-      eligible: false,
-      reason: `Campaign is not currently live (Status: ${project.status === "pending_review" ? "Pre-Audit / Under Review" : project.status.replace("_", " ")}).`,
-    };
+    return buildEligibilityResult(
+      false,
+      "CAMPAIGN_NOT_LIVE",
+      `Campaign is not currently live (Status: ${project.status === "pending_review" ? "Pre-Audit / Under Review" : String(project.status || "").replace("_", " ")}).`
+    );
   }
 
   // 1b. Deadline Check: block pledges when now() >= campaign_end_date
   if (project.campaign_end_date) {
     const deadlineMs = new Date(project.campaign_end_date).getTime();
     if (!isNaN(deadlineMs) && Date.now() >= deadlineMs) {
-      return {
-        eligible: false,
-        reason: "The campaign deadline has passed and this campaign is no longer accepting pledges.",
-      };
+      return buildEligibilityResult(
+        false,
+        "CAMPAIGN_DEADLINE_PASSED",
+        "The campaign deadline has passed and this campaign is no longer accepting pledges."
+      );
     }
   }
 
-  // 2. SPV Equity Contract Check (Classes 1-4 only)
+  // 2. SPV Equity Contract Check (Classes 1-4 only) & Visibility Check
   if (project.sharia_contract_type === "spv_equity" && classNum > 4) {
-    return {
-      eligible: false,
-      reason: "Projects structured with SPV Equity are restricted to Class 1 to Class 4 investors only.",
-    };
+    return buildEligibilityResult(
+      false,
+      "SPV_EQUITY_RESTRICTED",
+      "Projects structured with SPV Equity are restricted to Class 1 to Class 4 investors only."
+    );
+  }
+
+  if (!checkProjectVisibilityInternal(project, classNum)) {
+    return buildEligibilityResult(
+      false,
+      "NOT_VISIBLE_TO_CLASS",
+      "Project not found or not eligible for your investor class."
+    );
   }
 
   // 3. Class Max Pledge Check vs Min Floor
   const floor = Number(project.min_investment_floor) || 0;
   if (floor > cfg.maxPledge) {
-    return {
-      eligible: false,
-      reason: `Minimum investment floor (${project.currency || "USD"} ${floor.toLocaleString()}) exceeds your ${cfg.name} maximum pledge limit of ${project.currency || "USD"} ${cfg.maxPledge.toLocaleString()}.`,
-    };
+    return buildEligibilityResult(
+      false,
+      "FLOOR_EXCEEDS_CLASS_MAX",
+      `Minimum investment floor (${project.currency || "USD"} ${floor.toLocaleString()}) exceeds your ${cfg.name} maximum pledge limit of ${project.currency || "USD"} ${cfg.maxPledge.toLocaleString()}.`
+    );
   }
 
-  // 3. Single Pledge per Project Check (All classes)
-  if (investorId) {
+  // 4. Single Pledge per Project Check (All classes)
+  if (resolvedInvestorId) {
     const { data: existingPledge } = await supabaseAdmin
       .from("pledges")
       .select("id")
-      .eq("investor_id", investorId)
+      .eq("investor_id", resolvedInvestorId)
       .eq("project_id", project.id)
       .not("status", "in", '("cancelled","refunded","rejected_oversubscribed")')
+      .limit(1)
       .maybeSingle();
 
     if (existingPledge) {
-      return {
-        eligible: false,
-        reason: "You have already pledged to this project. Each investor is limited to one pledge per project.",
-      };
+      return buildEligibilityResult(
+        false,
+        "ALREADY_PLEDGED_PROJECT",
+        "You have already pledged to this project. Each investor is limited to one pledge per project."
+      );
     }
   }
 
-  // 4. Active Pledges Limit Check (Class-based max active pledges across projects)
-  if (cfg.maxActivePledges !== Infinity && investorId) {
-    const { data: activePledges } = await supabaseAdmin
+  // 5a. Open Pledge Limit (cfg.maxOpenPledges) — counts all 'pending' pledges across any project,
+  // regardless of investor_class_at_pledge.
+  if (typeof cfg.maxOpenPledges === "number" && resolvedInvestorId) {
+    const { data: openPledges, count: openCountRaw, error: openErr } = await supabaseAdmin
       .from("pledges")
-      .select("id")
-      .eq("investor_id", investorId)
-      .not("status", "in", '("cancelled","refunded","rejected_oversubscribed")');
+      .select("id", { count: "exact" })
+      .eq("investor_id", resolvedInvestorId)
+      .in("status", OPEN_PLEDGE_STATUSES);
 
-    const activeCount = activePledges ? activePledges.length : 0;
-    if (activeCount >= cfg.maxActivePledges) {
-      return {
-        eligible: false,
-        reason: `${cfg.name} investors are limited to a maximum of ${cfg.maxActivePledges} active project pledge at a time.`,
-      };
+    if (openErr) {
+      console.error("Error checking open pledges limit:", openErr);
+      return buildEligibilityResult(
+        false,
+        "ELIGIBILITY_CHECK_ERROR",
+        "Unable to verify your open pledge limit right now. Please try again."
+      );
+    }
+
+    const openCount = openCountRaw ?? (openPledges ? openPledges.length : 0);
+    if (openCount >= cfg.maxOpenPledges) {
+      return buildEligibilityResult(
+        false,
+        OPEN_PLEDGE_LIMIT_CODE,
+        OPEN_PLEDGE_LIMIT_MESSAGE
+      );
     }
   }
 
-  // 5. Oversubscription Ceiling Check (150% of capacity)
+  // 5b. Quarterly Campaign Limit (cfg.maxCampaignsPerQuarter) — counts pledges in current UTC
+  // calendar quarter with status in QUARTER_COUNTED_STATUSES, regardless of investor_class_at_pledge.
+  if (typeof cfg.maxCampaignsPerQuarter === "number" && resolvedInvestorId) {
+    const { start, nextStart } = getQuarterWindow(new Date());
+    const {
+      data: quarterPledges,
+      count: quarterCountRaw,
+      error: quarterErr,
+    } = await supabaseAdmin
+      .from("pledges")
+      .select("id", { count: "exact" })
+      .eq("investor_id", resolvedInvestorId)
+      .in("status", QUARTER_COUNTED_STATUSES)
+      .gte("pledged_at", start.toISOString())
+      .lt("pledged_at", nextStart.toISOString());
+
+    if (quarterErr) {
+      console.error("Error checking quarterly pledge limit:", quarterErr);
+      return buildEligibilityResult(
+        false,
+        "ELIGIBILITY_CHECK_ERROR",
+        "Unable to verify your quarterly investment limit right now. Please try again."
+      );
+    }
+
+    const quarterCount =
+      quarterCountRaw ?? (quarterPledges ? quarterPledges.length : 0);
+    if (quarterCount >= cfg.maxCampaignsPerQuarter) {
+      return buildEligibilityResult(
+        false,
+        QUARTER_LIMIT_CODE,
+        formatQuarterLimitMessage(nextStart)
+      );
+    }
+  }
+
+  // 6. Oversubscription Ceiling Check (150% of capacity)
   const capacity = Number(project.hard_cap) || Number(project.target_goal) || 0;
   const currentLiveSubscribed = Number(project.live_raised_amount) || 0;
   if (capacity > 0 && currentLiveSubscribed >= capacity * (MAX_OVERSUBSCRIPTION_PERCENT / 100)) {
-    return {
-      eligible: false,
-      reason: "This campaign has reached its maximum subscription level.",
-    };
+    return buildEligibilityResult(
+      false,
+      "OVERSUBSCRIPTION_CEILING",
+      "This campaign has reached its maximum subscription level."
+    );
   }
 
-  return { eligible: true, reason: null };
+  return buildEligibilityResult(true, null, null);
 }
 
 /**

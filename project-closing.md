@@ -48,6 +48,8 @@ Hourly Cron (/api/cron/close-campaigns)
                set close_notifications_sent_at, and record project_close_log
 ```
 
+> **Class 9 & Class 10 Pledge Limit Effect at Close:** Closing a campaign transitions all of its `'pending'` pledges to `'allocated'`, `'rejected_oversubscribed'`, or `'refunded'`. Because no pledge on the closed project remains in `'pending'` status, campaign close immediately frees a Class 10 investor's **open-pledge slot** (`maxOpenPledges: 1`). Additionally, if a Class 9 or Class 10 investor's pledge closes as `'rejected_oversubscribed'` or `'refunded'`, it no longer counts toward their `maxCampaignsPerQuarter: 1` limit (`QUARTER_COUNTED_STATUSES = ['pending', 'allocated', 'active', 'completed']`), allowing them to pledge again in the same UTC calendar quarter.
+
 ---
 
 ## 2. Trigger, Claiming & Background Execution
@@ -219,10 +221,10 @@ Follow the 6 blocks below in order to verify the campaign closing system end-to-
 
 ### Prerequisites
 1. In the **Supabase SQL Editor**, run:
-   - `closing_schema.sql`
-   - `closing_function.sql`
+   - `database/schema/closing_schema.sql`
+   - `database/rpc/closing_function.sql`
 2. Ensure your `.env.local` has `CRON_SECRET` set (for example `CRON_SECRET=my-local-cron-secret`) and your local dev server is running (`npm run dev` on `http://localhost:3000`).
-3. Open `scripts/closing-test-seed.sql`, optionally set `v_issuer_id` and `v_real_investor_id` at the top of the `DO $$ DECLARE` block (or leave them `NULL` to auto-select your latest issuer and real investor), and run `scripts/closing-test-seed.sql` in the Supabase SQL Editor. Note the returned `id` for each `test-closing-s1` ... `test-closing-s15` project.
+3. Open `tests/campaign-closing/closing-test-seed.sql`, optionally set `v_issuer_id` and `v_real_investor_id` at the top of the `DO $$ DECLARE` block (or leave them `NULL` to auto-select your latest issuer and real investor), and run `tests/campaign-closing/closing-test-seed.sql` in the Supabase SQL Editor. Note the returned `id` for each `test-closing-s1` ... `test-closing-s15` project.
 
 ---
 
@@ -420,6 +422,8 @@ ORDER BY id;
    - Visit `/investor-portal/investments`:
      - Under **Holdings**, verify your allocated test holding (on `test-closing-s2-soft-cap-met`) shows its final `allocated_amount` and `allocated_units`.
      - Under **Pledges**, verify your refunded test pledge (on `test-closing-s9-below-soft-cap`) appears with the `"Refunded"` badge and shows the refunded amount returned to wallet.
+   - Visit `/investor-portal/portfolio`:
+     - Cross-reference with the [Portfolio Page Guide](portfolio-page.md) to verify your deployed capital, contract distributions, continuous timeline, and outcomes reflect your allocated holdings and outcomes.
    - Visit `/investor-portal/projects/test-closing-s2-soft-cap-met` and `/investor-portal/projects/test-closing-s9-below-soft-cap`:
      - Verify both closed project pages load for your investor account, display the funded/failed banner at the top, and keep the pledge button disabled.
    - Visit `/investor-portal/notifications`:
@@ -427,8 +431,17 @@ ORDER BY id;
 2. **Issuer Portal**:
    - Visit `/issuer-portal/projects` and `/issuer-portal/notifications` to verify the `Funded` and `Failed` badges, the overview summary cards, and the `campaign_funded` / `campaign_failed` issuer notifications.
 3. **Clean Up All Test Data**:
-   - Run `scripts/closing-test-cleanup.sql` in the Supabase SQL Editor and verify zero `test-closing-%` rows remain:
+   - Run `tests/campaign-closing/closing-test-cleanup.sql` in the Supabase SQL Editor and verify zero `test-closing-%` rows remain:
    ```sql
    SELECT COUNT(*) FROM public.projects WHERE slug LIKE 'test-closing-%';
    SELECT COUNT(*) FROM public.investors WHERE email LIKE 'test.closing.%@example.com';
    ```
+
+---
+
+## 13. Next Lifecycle Stage: Fund Release & Repayments
+
+Once a project closes successfully with status `'funded'`, escrow funds are released and periodic Sharia distributions begin. For technical architecture, mathematical formulas, and simulation procedures, see:
+- [Repayment Simulation Engine Documentation](file:///Users/marchakimmwai/Desktop/unoffical-projects/crowd-funding-platform-prototype/repayment-simulation.md)
+- [Investor Portfolio Page Specification](file:///Users/marchakimmwai/Desktop/unoffical-projects/crowd-funding-platform-prototype/portfolio-page.md)
+

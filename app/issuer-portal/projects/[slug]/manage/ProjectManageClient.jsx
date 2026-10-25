@@ -14,6 +14,7 @@ import {
   Building2,
   ExternalLink,
   Eye,
+  Coins,
 } from "lucide-react";
 
 import OverviewTab from "./components/OverviewTab";
@@ -21,6 +22,7 @@ import RoadmapTab from "./components/RoadmapTab";
 import DocumentsTab from "./components/DocumentsTab";
 import ConversionTab from "./components/ConversionTab";
 import DistributionsTab from "./components/DistributionsTab";
+import RepaymentsTab from "./components/RepaymentsTab";
 
 export default function ProjectManageClient({ data }) {
   const { isDraft, project, totalInvestorCount, classBreakdown, statusCounts, milestones, documents } = data;
@@ -68,6 +70,13 @@ export default function ProjectManageClient({ data }) {
       icon: DollarSign,
       visible: () => true,
       component: DistributionsTab,
+    },
+    {
+      key: "repayments",
+      label: "Repayments",
+      icon: Coins,
+      visible: (p) => ["active", "completed", "funded"].includes(p?.status),
+      component: RepaymentsTab,
     },
   ];
 

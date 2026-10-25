@@ -16,6 +16,7 @@ import {
   Building2,
   AlertTriangle,
   Landmark,
+  Coins,
 } from "lucide-react";
 import {
   getInvestorNotifications,
@@ -60,6 +61,7 @@ export default function NotificationsPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchNotifications(page, activeTab);
   }, [page, activeTab]);
 
@@ -160,12 +162,27 @@ export default function NotificationsPage() {
           iconBg: "bg-rose-600 text-white",
           icon: AlertTriangle,
         };
+      case "shariah_certificate":
+      case "certificate":
+        return {
+          label: "Shariah Certificate",
+          badgeBg: "bg-emerald-100 text-[#064e3b] border-emerald-300",
+          iconBg: "bg-[#064e3b] text-emerald-300",
+          icon: ShieldCheck,
+        };
       case "campaign_closed":
         return {
           label: "Campaign Closed",
           badgeBg: "bg-amber-100 text-amber-900 border-amber-300",
           iconBg: "bg-amber-500 text-white",
           icon: Clock,
+        };
+      case "repayment":
+        return {
+          label: "Repayment & Distribution",
+          badgeBg: "bg-emerald-100 text-[#064e3b] border-emerald-300",
+          iconBg: "bg-[#064e3b] text-emerald-300",
+          icon: Coins,
         };
       default:
         return {
@@ -336,6 +353,31 @@ export default function NotificationsPage() {
                       <p className="text-xs text-[#064e3b]/80 leading-relaxed max-w-3xl">
                         {item.message || item.notification_text || item.description}
                       </p>
+
+                      {(String(item.type).toLowerCase() === "shariah_certificate" ||
+                        String(item.type).toLowerCase() === "certificate") && (
+                        <div className="pt-1">
+                          <Link
+                            href="/investor-portal/documents"
+                            className="inline-flex items-center gap-1 text-xs font-bold text-[#059669] hover:text-[#064e3b] hover:underline"
+                          >
+                            <span>Open Document Vault</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </Link>
+                        </div>
+                      )}
+
+                      {String(item.type).toLowerCase() === "repayment" && (
+                        <div className="pt-1">
+                          <Link
+                            href="/investor-portal/portfolio"
+                            className="inline-flex items-center gap-1 text-xs font-bold text-[#059669] hover:text-[#064e3b] hover:underline"
+                          >
+                            <span>View in Portfolio</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </Link>
+                        </div>
+                      )}
                     </div>
                   </div>
 

@@ -31,6 +31,7 @@ import {
   getRoiHelperForContract,
 } from "@/lib/validation/repaymentTermsSchema";
 import { createPledge } from "@/app/actions/pledge";
+import { checkInvestEligibility } from "@/app/actions/marketplace";
 import { CLASS_CONFIG } from "@/app/constants/classConfig";
 import {
   PLEDGE_DISCLOSURES,
@@ -72,7 +73,7 @@ export default function ProjectDetailView({
   project,
   investor = null,
   investorClass = 10,
-  eligibility = { eligible: false },
+  eligibility = { allowed: false, eligible: false, code: null, message: null },
   viewerRole = "investor",
   classBandSubscription = null,
   conversionDemand = null,
@@ -87,8 +88,16 @@ export default function ProjectDetailView({
   const [pledgeError, setPledgeError] = useState("");
   const [pledgeSuccess, setPledgeSuccess] = useState(false);
   const [pledgeResultData, setPledgeResultData] = useState(null);
+  const [liveEligibility, setLiveEligibility] = useState(null);
 
   if (!project) return null;
+
+  const effectiveEligibility = liveEligibility || eligibility || { allowed: false, eligible: false };
+  const isEligible = Boolean(
+    effectiveEligibility.allowed ?? effectiveEligibility.eligible
+  );
+  const eligibilityMessage =
+    effectiveEligibility.message || effectiveEligibility.reason || null;
 
   const isIssuerPreview = viewerRole === "issuer_preview";
   const currency = project.currency || "USD";
@@ -265,6 +274,31 @@ export default function ProjectDetailView({
     cap_table: "Capitalization Table",
   };
 
+  const handleOpenPledgeModal = async () => {
+    setPledgeError("");
+    setIsPledgeModalOpen(true);
+    try {
+      const fresh = await checkInvestEligibility(
+        project,
+        investorClass,
+        investor?.id
+      );
+      if (fresh) {
+        setLiveEligibility(fresh);
+        const allowed = Boolean(fresh.allowed ?? fresh.eligible);
+        if (!allowed) {
+          setPledgeError(
+            fresh.message ||
+              fresh.reason ||
+              "You are not eligible to invest in this project."
+          );
+        }
+      }
+    } catch {
+      // Fall back to server-rendered eligibility prop and submit-time check
+    }
+  };
+
   const handlePledgeSubmit = async (e) => {
     e.preventDefault();
     setPledgeError("");
@@ -308,7 +342,7 @@ export default function ProjectDetailView({
       });
 
       if (!res.success) {
-        setPledgeError(res.error || "Failed to process pledge.");
+        setPledgeError(res.message || res.error || "Failed to process pledge.");
       } else {
         setPledgeSuccess(true);
         setPledgeResultData(res);
@@ -1555,9 +1589,9 @@ export default function ProjectDetailView({
                 </p>
               </div>
 
-              {eligibility.eligible ? (
+              {isEligible ? (
                 <button
-                  onClick={() => setIsPledgeModalOpen(true)}
+                  onClick={handleOpenPledgeModal}
                   className="px-8 py-4 rounded-2xl bg-emerald-500 text-white font-extrabold text-sm hover:bg-emerald-400 transition-all shadow-lg hover:shadow-emerald-500/25 shrink-0 flex items-center justify-center gap-2 cursor-pointer"
                 >
                   Invest Now <ChevronRight className="w-5 h-5" />
@@ -1565,6 +1599,7 @@ export default function ProjectDetailView({
               ) : (
                 <button
                   disabled
+                  title={eligibilityMessage || "Ineligible to Invest"}
                   className="px-6 py-3.5 rounded-2xl bg-slate-800 text-slate-400 font-bold text-xs shrink-0 flex items-center gap-2 cursor-not-allowed border border-slate-700"
                 >
                   <Lock className="w-4 h-4 text-amber-400" /> Ineligible to Invest
@@ -1572,14 +1607,14 @@ export default function ProjectDetailView({
               )}
             </div>
 
-            {!eligibility.eligible && eligibility.reason && (
+            {!isEligible && eligibilityMessage && (
               <div className="bg-amber-500/15 border border-amber-500/30 rounded-2xl p-4 text-amber-200 text-xs flex items-start gap-3">
                 <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
                 <div>
                   <strong className="text-white font-bold block mb-0.5">
                     Investment Restriction Notice
                   </strong>
-                  {eligibility.reason}
+                  {eligibilityMessage}
                 </div>
               </div>
             )}

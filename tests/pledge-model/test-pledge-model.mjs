@@ -1,17 +1,33 @@
+/**
+ * FILE: tests/pledge-model/test-pledge-model.mjs
+ * PURPOSE:
+ *   Live Supabase & constants verification for the "Request, Then Allocate"
+ *   pledge model and investor privacy rules:
+ *     1. Config & Constants Integrity (150% oversubscription, v1.0 terms, conversion caps)
+ *     2. Conversion & Ceiling Math Logic
+ *     3. Database Schema Integrity (Live Supabase check for required columns)
+ *     4. Server Action Query Aggregations (exclusion of cancelled/refunded/rejected pledges)
+ *     5. Webhook Payload Structure Validation (no PII leakage)
+ *     6. Class Band Privacy Merging Rules (Max Class 1–4 k-anonymity)
+ *
+ * HOW TO RUN:
+ *   node --env-file=.env.local tests/pledge-model/test-pledge-model.mjs
+ */
+
 import { createClient } from "@supabase/supabase-js";
 import {
   MAX_OVERSUBSCRIPTION_PERCENT,
   PLEDGE_TERMS_VERSION,
   PLEDGE_DISCLOSURES,
   PLEDGE_TERMS_CHECKBOX_LABEL,
-} from "../app/constants/pledgeConfig.js";
-import { CLASS_CONFIG } from "../app/constants/classConfig.js";
+} from "../../app/constants/pledgeConfig.js";
+import { CLASS_CONFIG } from "../../app/constants/classConfig.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_KEY;
 
 if (!supabaseUrl || !serviceKey) {
-  console.error("❌ Missing Supabase credentials in environment");
+  console.error("❌ Missing Supabase credentials in environment (.env.local)");
   process.exit(1);
 }
 
@@ -48,7 +64,6 @@ async function runTests() {
   // --------------------------------------------------------------------------
   console.log("\n2. Conversion & Ceiling Math Logic");
   // --------------------------------------------------------------------------
-  // Formula: requested_conversion_units = floor(min(pledgeAmount, classCap) / unitPrice)
   const unitPrice = 250;
   
   // Class 1 pledging $2,000,000 (uncapped)
@@ -106,7 +121,6 @@ async function runTests() {
     .maybeSingle();
 
   if (sampleProject) {
-    // Check exclusion of rejected_oversubscribed in live queries
     const { data: activePledges, error: apErr } = await supabaseAdmin
       .from("pledges")
       .select("id, pledged_amount, status")
@@ -176,7 +190,6 @@ async function runTests() {
     return bands;
   }
 
-  // 1 from Class 1, 1 from Class 2, 1 from Class 4, 1 from Class 6, 1 from Class 10
   const scenarioBands = computeBands([
     { class: 1 }, { class: 2 }, { class: 4 }, { class: 6 }, { class: 10 }
   ]);

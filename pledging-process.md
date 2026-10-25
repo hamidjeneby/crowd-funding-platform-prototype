@@ -66,10 +66,11 @@ Before the "Invest Now" / "Submit Pledge Request" button is enabled, the followi
 | Project status is `campaign_live` | `checkInvestEligibility()` | Server-side |
 | Investor has **NOT** already pledged to this project | `checkInvestEligibility()` | Server-side (`pledges` table lookup) |
 | Investor's class max pledge ≥ project's min floor | `checkInvestEligibility()` | Server-side |
-| Active pledge limit not exceeded (Class 10) | `checkInvestEligibility()` | Server-side |
+| Open pledge limit not exceeded (`maxOpenPledges: 1` for Class 10; `status = 'pending'`) | `checkInvestEligibility()` (`OPEN_PLEDGE_LIMIT`) | Server-side + DB partial unique index (`uniq_class10_one_active_pledge`) |
+| Quarterly campaign limit not exceeded (`maxCampaignsPerQuarter: 1` for Classes 9 & 10 in current UTC quarter) | `checkInvestEligibility()` (`QUARTER_LIMIT`) | Server-side + DB partial unique index (`uniq_class9_10_one_pledge_per_quarter`) |
 | Campaign oversubscription ceiling not exceeded | Ceiling check (`≤ 150%`) | Server-side |
 
-If any condition fails, the invest button is disabled and a clear reason is displayed.
+If any condition fails, the invest button is disabled and the exact eligibility message is displayed.
 
 ---
 
@@ -308,20 +309,22 @@ Under the **request, then allocate** model, conversion pool units are not consum
 
 ### Server-Side Validations (in order of evaluation)
 
-| # | Check | Error Message |
-|---|---|---|
-| 1 | User is authenticated | "You must be logged in to pledge an investment." |
-| 2 | Terms accepted | "You must read and accept the subscription terms to submit a pledge." |
-| 3 | Amount is a valid positive number | "Please enter a valid investment amount." |
-| 4 | Investor profile exists | "Investor profile not found. Please complete onboarding first." |
-| 5 | Project is visible to class | "Project not found or not eligible for your investor class." |
-| 6 | Campaign is live | "Campaign is not currently live." |
-| 7 | Single pledge per project | "You have already pledged to this project. Each investor is limited to one pledge per project." |
-| 8 | Amount ≥ min_investment_floor | "Investment amount cannot be lower than the minimum floor of {currency} {floor}." |
-| 9 | Amount ≤ CLASS_CONFIG[class].maxPledge | "Investment amount exceeds your Class {n} maximum pledge limit of {currency} {max}." |
-| 10 | Oversubscription ceiling check (`≤ 150%`) | "This pledge would exceed the campaign's maximum oversubscription limit (150% of capacity). Maximum remaining: {currency} {remaining}." |
-| 11 | Wallet balance ≥ amount + fee | "Insufficient wallet balance. You need {currency} {total} but have {currency} {balance}. Please top up your wallet." |
-| 12 | Active pledge limit (Class 10) | "Class 10 investors are limited to 1 active pledge at a time." |
+| # | Check | Code | Error Message |
+|---|---|---|---|
+| 1 | User is authenticated | — | "You must be logged in to pledge an investment." |
+| 2 | Terms accepted | — | "You must review and accept the subscription terms to submit a pledge." |
+| 3 | Amount is a valid positive number | — | "Please enter a valid investment amount." |
+| 4 | Investor profile exists & onboarding complete | `ONBOARDING_INCOMPLETE` | "Investor profile not found. Please complete onboarding first." |
+| 5 | Project is visible to class | `NOT_VISIBLE_TO_CLASS` | "Project not found or not eligible for your investor class." |
+| 6 | Campaign is live & before `campaign_end_date` | `CAMPAIGN_NOT_LIVE` / `CAMPAIGN_DEADLINE_PASSED` | "Campaign is not currently live..." / "The campaign deadline has passed and this campaign is no longer accepting pledges." |
+| 7 | Single pledge per project | `ALREADY_PLEDGED_PROJECT` | "You have already pledged to this project. Each investor is limited to one pledge per project." |
+| 8 | Open pledge limit (`cfg.maxOpenPledges`, Class 10: `status = 'pending'`) | `OPEN_PLEDGE_LIMIT` | "Your investor class allows one open pledge at a time. You can pledge again after your current pledge is allocated or closed." |
+| 9 | Quarterly campaign limit (`cfg.maxCampaignsPerQuarter`, Classes 9 & 10: `pledged_at` in current UTC quarter and `status IN ('pending','allocated','active','completed')`) | `QUARTER_LIMIT` | "Your investor class allows one campaign per quarter. You can invest again from {nextStart date, e.g. 1 January 2027} (UTC)." |
+| 10 | Amount ≥ `min_investment_floor` | `FLOOR_EXCEEDS_CLASS_MAX` | "Investment amount cannot be lower than the minimum floor of {currency} {floor}." |
+| 11 | Amount ≤ `CLASS_CONFIG[class].maxPledge` | — | "Investment amount exceeds your {class name} maximum pledge limit of {currency} {max}." |
+| 12 | Oversubscription ceiling check (`≤ 150%`) | `OVERSUBSCRIPTION_CEILING` | "This pledge exceeds the 150% maximum subscription ceiling ({currency} {max}). Maximum remaining intake is {currency} {remaining}." |
+| 13 | Wallet balance ≥ amount + fee | — | "Insufficient wallet balance..." |
+| 14 | Postgres `23505` unique index backstop (`uniq_class10_one_active_pledge` / `uniq_class9_10_one_pledge_per_quarter`) | `OPEN_PLEDGE_LIMIT` / `QUARTER_LIMIT` | Mapped via `mapPledgeInsertError` to the exact friendly messages in #8 and #9 (never exposes raw database errors). |
 
 ### Single Pledge per Project Rule
 
@@ -453,7 +456,7 @@ Upon every successful pledge submission, the backend dispatches a webhook to Mak
 
 ## Portfolio Page Calculation Rules
 
-The Portfolio Page (`/investor-portal/portfolio`) displays financial health, asset allocation, and rolled-up metrics.
+The Portfolio Page (`/investor-portal/portfolio`) displays financial health, asset allocation, and rolled-up analytical metrics. For complete architectural documentation, aggregation formulas, accessibility design, and test instructions, refer to [portfolio-page.md](file:///Users/marchakimmwai/Desktop/unoffical-projects/crowd-funding-platform-prototype/portfolio-page.md).
 
 ### Portfolio Metric Computation Rules
 

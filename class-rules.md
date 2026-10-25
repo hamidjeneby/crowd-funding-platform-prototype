@@ -20,8 +20,8 @@ commercial/cosmetic feature, but carries no access-control meaning today.
 | 6 | AED 200,000 | Live campaigns > AED 10M only | 1.0% | No | No | — |
 | 7 | AED 50,000 | Live campaigns > AED 15M only | 1.2% | No | No | — |
 | 8 | AED 10,000 | Live campaigns > AED 20M only | 1.5% | No | No | — |
-| 9 | AED 2,000 | Live campaigns > AED 20M only, single campaign per quarter | 2.0% | No | No | Retail with higher risk awareness |
-| 10 | AED 500 | Live campaigns > AED 20M only, single campaign per quarter, max one active pledge at a time | 2.5% | No | No | General public |
+| 9 | AED 2,000 | Live campaigns > AED 20M only, single campaign per UTC quarter | 2.0% | No | No | Retail with higher risk awareness |
+| 10 | AED 500 | Live campaigns > AED 20M only, single campaign per UTC quarter, max one open (`pending`) pledge at a time | 2.5% | No | No | General public |
 
 ---
 
@@ -33,9 +33,27 @@ commercial/cosmetic feature, but carries no access-control meaning today.
 
 **Investor Fee** — a percentage taken from the investor's own pledge amount (not the issuer's proceeds). Counterintuitively, the fee *increases* as class number increases — this is standard relationship-pricing logic: larger, more trusted investors (Class 1) get the best rate, the same way a bank offers better terms to a bigger account.
 
-**Conversion Clause Access** — whether this investor's Sukuk holding can convert into real company shares if a project's conversion trigger fires (e.g. "share price crosses AED 10"). See §5 for full mechanics.
+**Conversion Clause Access** — whether this investor's Sukuk holding can convert into real company shares if a project's conversion trigger fires (e.g. "share price crosses AED 10"). See §6 for full mechanics.
 
-**Can Underwrite?** — whether this investor is eligible to personally cover a project's funding shortfall in exchange for compensation. See §6 for full mechanics.
+**Can Underwrite?** — whether this investor is eligible to personally cover a project's funding shortfall in exchange for compensation. See §7 for full mechanics.
+
+---
+
+## 2b. Class 9 & Class 10 Pledge Frequency Limits (`lib/pledgeLimits.js`)
+
+Classes 1–8 have no open-pledge or quarterly campaign frequency limits. For Classes 9 and 10, limits are configured in `CLASS_CONFIG` (`app/constants/classConfig.js`), evaluated exclusively in `checkInvestEligibility` (`app/actions/marketplace.js`) against the investor's **current** `investor_class` at pledge time, and backed by partial unique indexes in `class_limits_backstop.sql`:
+
+1. **Open Pledge Limit (Class 10 — `maxOpenPledges: 1`, code `OPEN_PLEDGE_LIMIT`):**
+   - **"Open pledge"** means a row in `pledges` with `status = 'pending'` (`OPEN_PLEDGE_STATUSES = ['pending']`) — i.e., a pledge waiting for its campaign to close and allocate.
+   - The open-pledge slot is freed as soon as the pledge leaves `'pending'` (`allocated`, `rejected_oversubscribed`, `refunded`, or `cancelled`).
+   - Rejection message: `"Your investor class allows one open pledge at a time. You can pledge again after your current pledge is allocated or closed."`
+
+2. **One Campaign per UTC Calendar Quarter (Class 9 & Class 10 — `maxCampaignsPerQuarter: 1`, code `QUARTER_LIMIT`):**
+   - Quarters are **UTC calendar quarters** (`Jan–Mar`, `Apr–Jun`, `Jul–Sep`, `Oct–Dec`), measured strictly by the pledge's `pledged_at` timestamp in UTC (`[window.start, window.nextStart)` from `getQuarterWindow(date)`), **not** by campaign start/end dates.
+   - **Counted statuses:** `QUARTER_COUNTED_STATUSES = ['pending', 'allocated', 'active', 'completed']`.
+   - **Excluded statuses:** `cancelled`, `refunded`, and `rejected_oversubscribed` pledges do **not** consume the investor's quarterly slot, so an investor whose pledge is cancelled, refunded on a failed campaign, or rejected due to oversubscription can pledge again in the same quarter.
+   - **Downgrade rule:** `checkInvestEligibility` counts all matching pledges belonging to `investor_id` regardless of their historical `investor_class_at_pledge`, so an investor downgraded into Class 9 or Class 10 is still bound by pledges made earlier under a higher class.
+   - Rejection message: `"Your investor class allows one campaign per quarter. You can invest again from {nextStart date, e.g. 1 January 2027} (UTC)."`
 
 ---
 

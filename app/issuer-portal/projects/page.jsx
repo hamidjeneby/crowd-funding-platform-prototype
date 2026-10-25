@@ -56,37 +56,65 @@ export default async function ProjectsPage() {
           getLiveConversionTotals(projectIds),
         ]);
 
-        projects = await Promise.all(
-          rawProjects.map(async (p) => {
-            let coverUrl = p.cover_image_url;
-            if (coverUrl && coverUrl.includes("/cover_img/")) {
-              const urlParts = coverUrl.split("/cover_img/");
-              if (urlParts.length === 2) {
-                const { data: sData } = await supabaseAdmin.storage
-                  .from("cover_img")
-                  .createSignedUrl(urlParts[1], 3600);
-                if (sData?.signedUrl) {
-                  coverUrl = sData.signedUrl;
+        // Batch resolve signed URLs for cover images
+        const coverPathsToSign = [];
+        const projectCoverPathMap = new Map();
+
+        for (const p of rawProjects) {
+          const rawUrl = p.cover_image_url;
+          if (rawUrl && rawUrl.includes("/cover_img/")) {
+            const parts = rawUrl.split("/cover_img/");
+            if (parts.length === 2 && parts[1]) {
+              const path = parts[1];
+              projectCoverPathMap.set(p.id, path);
+              if (!coverPathsToSign.includes(path)) {
+                coverPathsToSign.push(path);
+              }
+            }
+          }
+        }
+
+        const signedUrlByPath = new Map();
+        if (coverPathsToSign.length > 0) {
+          try {
+            const { data: signedResults, error: sErr } = await supabaseAdmin.storage
+              .from("cover_img")
+              .createSignedUrls(coverPathsToSign, 3600);
+
+            if (!sErr && Array.isArray(signedResults)) {
+              for (const res of signedResults) {
+                if (res?.signedUrl && res?.path) {
+                  signedUrlByPath.set(res.path, res.signedUrl);
                 }
               }
             }
+          } catch (e) {
+            console.warn("Batch signing issuer cover images failed, using fallback URLs:", e);
+          }
+        }
 
-            let spvDetails = null;
-            if (Array.isArray(p.spv_details) && p.spv_details.length > 0) {
-              spvDetails = p.spv_details[0];
-            } else if (p.spv_details && typeof p.spv_details === "object") {
-              spvDetails = p.spv_details;
-            }
+        projects = rawProjects.map((p) => {
+          let coverUrl = p.cover_image_url;
+          const path = projectCoverPathMap.get(p.id);
+          if (path && signedUrlByPath.has(path)) {
+            coverUrl = signedUrlByPath.get(path);
+          }
 
-            return {
-              ...p,
-              spv_details: spvDetails,
-              cover_image_url: coverUrl,
-              live_raised_amount: raisedTotals[p.id] || 0,
-              live_conversion_units: conversionTotals[p.id] || 0,
-            };
-          })
-        );
+          let spvDetails = null;
+          if (Array.isArray(p.spv_details) && p.spv_details.length > 0) {
+            spvDetails = p.spv_details[0];
+          } else if (p.spv_details && typeof p.spv_details === "object") {
+            spvDetails = p.spv_details;
+          }
+
+          return {
+            ...p,
+            spv_details: spvDetails,
+            cover_image_url: coverUrl,
+            live_raised_amount: raisedTotals[p.id] || 0,
+            live_conversion_units: conversionTotals[p.id] || 0,
+          };
+        });
       }
     }
   } catch (err) {

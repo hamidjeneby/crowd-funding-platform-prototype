@@ -18,7 +18,6 @@ import {
   Sparkles,
   Layers,
   CheckCircle2,
-  DollarSign,
 } from "lucide-react";
 
 function formatUtcDate(dateString) {
@@ -57,6 +56,7 @@ export default async function InvestorDashboardPage() {
   const investorId = investor?.id;
 
   let totalCapitalDeployed = 0;
+  let activeHoldingsCount = 0;
   let activePledgesCount = 0;
   let pendingPledgedAmount = 0;
   let recentNotifications = [];
@@ -95,16 +95,21 @@ export default async function InvestorDashboardPage() {
       0
     );
 
-    // Stat card 3: Active Pledges Count: COUNT where status IN (allocated, active)
-    const activePledges = pledges.filter((p) =>
-      ["allocated", "active"].includes((p.status || "").toLowerCase())
-    );
-    activePledgesCount = activePledges.length;
+    // Stat card 2: Active Holdings: COUNT where status IN (allocated, active) AND projects.status != 'completed' (repayment not complete)
+    const activeHoldings = pledges.filter((p) => {
+      const st = (p.status || "").toLowerCase();
+      const projSt = (p.projects?.status || "").toLowerCase();
+      return ["allocated", "active"].includes(st) && projSt !== "completed";
+    });
+    activeHoldingsCount = activeHoldings.length;
 
-    // Stat card 4: Pending (awaiting allocation): SUM(pledged_amount) where status = 'pending'
+    // Stat card 3: Active Pledges (pending allocation): COUNT where status = 'pending' (not yet allocated)
     const pendingPledges = pledges.filter(
       (p) => (p.status || "").toLowerCase() === "pending"
     );
+    activePledgesCount = pendingPledges.length;
+
+    // Stat card 4: Pending (awaiting allocation): SUM(pledged_amount) where status = 'pending'
     pendingPledgedAmount = pendingPledges.reduce(
       (sum, p) => sum + Number(p.pledged_amount || 0),
       0
@@ -235,38 +240,35 @@ export default async function InvestorDashboardPage() {
           </div>
         </div>
 
-        {/* Card 2: Total Returns Received (Coming Soon State) */}
-        <div className="p-6 rounded-3xl bg-white border border-[#059669]/15 shadow-xs relative flex flex-col justify-between">
+        {/* Card 2: Active Holdings */}
+        <div className="p-6 rounded-3xl bg-white border border-[#059669]/15 shadow-xs hover:border-[#059669]/30 transition-all flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between text-[#064e3b]/70 text-xs font-semibold uppercase tracking-wider mb-2">
-              <span>Total Returns Received</span>
-              <DollarSign className="w-5 h-5 text-[#059669]" />
+              <span>Active Holdings</span>
+              <Briefcase className="w-5 h-5 text-[#059669]" />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-2xl font-black text-gray-400">—</span>
-              <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 font-bold text-[10px] uppercase tracking-wider border border-amber-200">
-                Coming Soon
-              </span>
+            <div className="text-3xl font-black text-[#064e3b]">
+              {activeHoldingsCount}
             </div>
           </div>
-          <div className="mt-3 text-xs text-gray-500">
-            Automated dividend payouts engine under development
+          <div className="mt-3 text-xs text-[#064e3b]/70">
+            Holdings awaiting repayment completion
           </div>
         </div>
 
-        {/* Card 3: Active Pledges Count */}
+        {/* Card 3: Active Pledges (Pending Allocation) */}
         <div className="p-6 rounded-3xl bg-white border border-[#059669]/15 shadow-xs hover:border-[#059669]/30 transition-all flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between text-[#064e3b]/70 text-xs font-semibold uppercase tracking-wider mb-2">
               <span>Active Pledges</span>
-              <Briefcase className="w-5 h-5 text-[#059669]" />
+              <Layers className="w-5 h-5 text-[#059669]" />
             </div>
             <div className="text-3xl font-black text-[#064e3b]">
               {activePledgesCount}
             </div>
           </div>
           <div className="mt-3 text-xs text-[#064e3b]/70">
-            Active campaign allocations
+            Pledges awaiting campaign allocation
           </div>
         </div>
 
