@@ -155,7 +155,7 @@ describe("Pure Repayment Calculation Engine (lib/repayments/calc.js)", () => {
     });
   });
 
-  describe("4. Block 2: Ijara (Yield 6%, sale_to_issuer, sale_to_third_party, return_asset)", () => {
+  describe("4. Block 2: Ijara (Yield 6%, sale_to_issuer, sale_to_third_party)", () => {
     const holdings = [
       { id: 1, investor_id: 101, allocated_amount: 100000 },
       { id: 2, investor_id: 102, allocated_amount: 50000 },
@@ -225,22 +225,6 @@ describe("Pure Repayment Calculation Engine (lib/repayments/calc.js)", () => {
       assert.equal(proceeds.find((r) => r.pledge_id === 1).amount, 110000);
       assert.equal(proceeds.find((r) => r.pledge_id === 2).amount, 55000);
       assert.equal(proceeds.find((r) => r.pledge_id === 3).amount, 11000);
-    });
-
-    test("Ijara return_asset: rent only, no cash line at end of term", () => {
-      const project = {
-        sharia_contract_type: "ijara",
-        expected_roi_percent: 6,
-        tenor_months: 12,
-        contract_terms: {
-          payment_frequency: "quarterly",
-          end_of_term: "return_asset",
-        },
-      };
-
-      const { repayments } = buildSchedule(project, holdings, "2026-01-01T00:00:00Z");
-      assert.equal(repayments.filter((r) => r.type === "sale_proceeds").length, 0);
-      assert.equal(repayments.every((r) => r.type === "rent"), true);
     });
   });
 

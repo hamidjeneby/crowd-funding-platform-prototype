@@ -36,11 +36,12 @@ When auditing a project proposal, the auditor reviews 5 comprehensive data panel
     - **Issuer Resubmission Reset**: When an issuer resubmits a project for review via `submitProjectForReview`:
       - If `shariah_compliance_status !== 'approved'`: `spv_details.spv_detail_verification_status` is reset to `'pending'` and `rejection_reason` is reset to `null`.
       - If `shariah_compliance_status === 'approved'`: SPV details remain `'approved'` (since SPV and project structure were locked from issuer edits) and `rejection_reason` is cleared (`null`).
-- **Conversion Clause Terms (if enabled)**:
-  - `conversion_enabled` (boolean)
+- **Conversion Clause Terms (if enabled — `class-rules.md` §6)**:
+  - `conversion_enabled` (boolean — only available when `sharia_contract_type` is `murabaha`, `mudarabah`, or `ijara` with `is_spv = true`; never available for `spv_equity`)
   - `conversion_trigger_value` (Trigger share price)
   - `conversion_ratio_shares` (Conversion ratio per unit)
   - `conversion_deadline` (Must be after campaign end date)
+  - *(Note: Terms are proposed by the issuer, finalized by compliance/Sharia review before launch, and locked once live. Only **Classes 1–4** hold conversion rights [Class 1 uncapped; Class 2 AED 1,000,000 cap; Class 3 AED 500,000 cap; Class 4 AED 250,000 cap] allocated at close in priority order Class 1 $\rightarrow$ Class 4; Classes 5–10 hold cash-only Sukuk.)*
 
 ### Panel 3: Financial Terms
 - **Target Goal, Soft Cap, Hard Cap**: Campaign funding boundaries.
@@ -93,26 +94,36 @@ Auditors perform Shariah compliance audits directly on the project review page:
 
 ## 4. Calculated Baseline Minimum Eligible Investor Class Panel
 
-To enforce regulatory compliance (§1 & §9 of `class-rules.md`), the project review workstation calculates a **System Baseline Minimum Class**:
+To enforce regulatory compliance (§1, §9 & §10 of `class-rules.md`), the project review workstation calculates a **System Baseline Minimum Class** (`Class 1` = highest tier / most restrictive; `Class 10` = lowest tier / broadest access, so only investors with `investor_class <= min_eligible_investor_class` may view or pledge):
 
 ### Algorithm Logic (`calculateBaselineMinClass`)
-1. **Floor Constraint (§9)**: Calculates max pledge capacity required based on `min_investment_floor`. (e.g. `floor > $500` excludes Class 10, requiring Class 9 or higher).
-2. **Target Raise Goal Threshold (§1)**:
-   - Target Goal > \$20M $\rightarrow$ Allows up to Class 10
-   - Target Goal > \$15M $\rightarrow$ Allows up to Class 7
-   - Target Goal > \$10M $\rightarrow$ Allows up to Class 6
-   - Target Goal > \$5M $\rightarrow$ Allows up to Class 5
-   - Target Goal $\le$ \$5M $\rightarrow$ Capped at Class 4
+1. **Floor Constraint (§1 & §9)**: Matches the project's `min_investment_floor` (in **AED**) against each class's per-project max pledge ceiling so classes unable to meet the minimum floor are excluded:
+   - `floor > AED 5,000,000` $\rightarrow$ **Class 1 only** (`1`; only Class 1 has Unlimited max pledge)
+   - `floor > AED 2,000,000` $\rightarrow$ Allows up to **Class 2** (`2`; max pledge AED 5,000,000)
+   - `floor > AED 1,000,000` $\rightarrow$ Allows up to **Class 3** (`3`; max pledge AED 2,000,000)
+   - `floor > AED 500,000` $\rightarrow$ Allows up to **Class 4** (`4`; max pledge AED 1,000,000)
+   - `floor > AED 200,000` $\rightarrow$ Allows up to **Class 5** (`5`; max pledge AED 500,000)
+   - `floor > AED 50,000` $\rightarrow$ Allows up to **Class 6** (`6`; max pledge AED 200,000)
+   - `floor > AED 10,000` $\rightarrow$ Allows up to **Class 7** (`7`; max pledge AED 50,000)
+   - `floor > AED 2,000` $\rightarrow$ Allows up to **Class 8** (`8`; max pledge AED 10,000)
+   - `floor > AED 500` $\rightarrow$ Allows up to **Class 9** (`9`; max pledge AED 2,000 — excludes Class 10, whose ceiling is AED 500)
+   - `floor <= AED 500` $\rightarrow$ Allows up to **Class 10** (`10`; max pledge AED 500)
+2. **Target Raise Goal Threshold (§1)**: Classes 1–4 see all live campaigns regardless of target size, whereas Classes 5–10 require campaigns strictly above the following **AED** thresholds (with Classes 9–10 also subject to §2b quarterly / open-pledge limits):
+   - Target Goal > **AED 20M** $\rightarrow$ Allows up to **Class 10** (unlocks Classes 8, 9, and 10)
+   - Target Goal > **AED 15M** $\rightarrow$ Allows up to **Class 7**
+   - Target Goal > **AED 10M** $\rightarrow$ Allows up to **Class 6**
+   - Target Goal > **AED 5M** $\rightarrow$ Allows up to **Class 5**
+   - Target Goal $\le$ **AED 5M** $\rightarrow$ Capped at **Class 4** (Classes 1–4 eligible only)
 3. **SPV Equity Structure Constraint (§10)**:
-   - For any project where `sharia_contract_type === 'spv_equity'`, eligibility is strictly capped at Class 4 (Classes 5–10 are permanently ineligible).
+   - For any project where `sharia_contract_type === 'spv_equity'`, eligibility is strictly restricted to **Classes 1–4** (Classes 5–10 are automatically ineligible to view or pledge).
 4. **Combined System Recommendation**:
-   - Takes the most restrictive overlap: `Math.min(highestClassByFloor, highestClassByGoal, highestClassByContract)`.
+   - Takes the most restrictive overlap (smallest class number): `Math.min(highestClassByFloor, highestClassByGoal, highestClassByContract)`. Investors with a class number higher than `min_eligible_investor_class` cannot view or pledge to this campaign.
 
 ### Auditor Assignment
 - Auditor inspects the recommendation card and saves the project's `min_eligible_investor_class` via `updateProjectMinClassDecision({ projectId, selectedClass })`.
 - **Enforcement Rules**:
   - Assignment is blocked if the project is marked Shariah non-compliant (`shariah_compliance_status === 'rejected'`).
-  - For SPV Equity projects, classes 5–10 are disabled in the UI and rejected server-side.
+  - For SPV Equity projects, Classes 5–10 are disabled in the UI and rejected server-side.
 
 ---
 
@@ -139,7 +150,7 @@ Auditor executes `submitProjectFinalDecision({ projectId, decision, reviewNotes 
 
 1. **Decision = 'approve'**:
    - **Status Update**: `projects.status = 'campaign_live'`, `review_notes = null`.
-   - **Marketplace Visibility**: Project becomes active and visible on the Investor Marketplace (`/investor-portal/marketplace`).
+   - **Marketplace Visibility (§1 & §8)**: While pre-audit (`pending_review`) projects are visible only to **Class 1** investors, approving to `campaign_live` makes the project active on the Investor Marketplace (`/investor-portal/marketplace`) for eligible classes — governed by `min_eligible_investor_class`, target raise size thresholds (`> AED 5M / 10M / 15M / 20M` for Classes 5–10), and the SPV Equity Class 1–4 restriction.
 
 2. **Decision = 'send_back'**:
    - **Status Update**: `projects.status = 'draft'`, `review_notes = reviewNotes`.

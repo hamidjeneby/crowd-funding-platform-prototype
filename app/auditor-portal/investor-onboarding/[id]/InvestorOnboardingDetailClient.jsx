@@ -460,13 +460,13 @@ export default function InvestorOnboardingDetailClient({
           <div className="bg-gray-50 p-3.5 rounded-2xl">
             <span className="text-gray-400 font-semibold block mb-0.5">Net Worth</span>
             <span className="font-bold text-emerald-800 text-sm">
-              {investor?.net_worth ? `$${Number(investor.net_worth).toLocaleString()}` : "N/A"}
+              {investor?.net_worth ? `AED ${Number(investor.net_worth).toLocaleString()}` : "N/A"}
             </span>
           </div>
           <div className="bg-gray-50 p-3.5 rounded-2xl">
             <span className="text-gray-400 font-semibold block mb-0.5">Annual Income</span>
             <span className="font-bold text-emerald-800 text-sm">
-              {investor?.annual_income ? `$${Number(investor.annual_income).toLocaleString()}` : "N/A"}
+              {investor?.annual_income ? `AED ${Number(investor.annual_income).toLocaleString()}` : "N/A"}
             </span>
           </div>
           <div className="bg-gray-50 p-3.5 rounded-2xl">
@@ -920,7 +920,7 @@ export default function InvestorOnboardingDetailClient({
               </div>
               <div>
                 <span className="text-gray-400 font-semibold block mb-0.5">Currency</span>
-                <span className="font-bold text-gray-800 text-sm">{investor.bank_details.currency || "USD"}</span>
+                <span className="font-bold text-gray-800 text-sm">{investor.bank_details.currency || "AED"}</span>
               </div>
             </div>
 

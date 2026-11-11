@@ -619,7 +619,7 @@ export async function checkInvestEligibility(project, investorClassRaw, investor
     return buildEligibilityResult(
       false,
       "FLOOR_EXCEEDS_CLASS_MAX",
-      `Minimum investment floor (${project.currency || "USD"} ${floor.toLocaleString()}) exceeds your ${cfg.name} maximum pledge limit of ${project.currency || "USD"} ${cfg.maxPledge.toLocaleString()}.`
+      `Minimum investment floor (${project.currency || "AED"} ${floor.toLocaleString()}) exceeds your ${cfg.name} maximum pledge limit of ${project.currency || "AED"} ${cfg.maxPledge.toLocaleString()}.`
     );
   }
 

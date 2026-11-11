@@ -78,7 +78,7 @@ Bracketed values come from the project. Wording needs legal and Sharia approval.
 - Payments / Reporting: Rent is paid [payment_frequency].
 - End of Term: [sale_to_issuer: The asset is sold to the issuer at the end of the term for
   [end_of_term_price] [currency]. | sale_to_third_party: The asset is sold to a third party and the
-  proceeds are distributed to holders. | return_asset: The asset is returned at the end of the term.]
+  proceeds are distributed to holders.]
 - Underlying Asset: [asset_description], valued at [asset_value] [currency].
 
 ### Mudarabah
@@ -95,8 +95,7 @@ Bracketed values come from the project. Wording needs legal and Sharia approval.
 - Term: No fixed term and no maturity date. This holding is not redeemable by the issuer.
 - Return: No fixed return. Value comes from dividends, if declared, and any change in the value of
   the shares. Not guaranteed.
-- Payments / Reporting: [dividend_policy: No dividends planned | Dividends at the issuer's
-  discretion | Target dividend payout]. Voting rights: [Yes | No].
+- Payments / Reporting: [dividend_policy: No dividends planned | Target dividend payout].
 - End of Term: An exit (sale, acquisition or listing) is possible but not guaranteed. Indicative exit
   horizon: [target_exit_horizon_years] years.
 - Underlying Asset: Shares in [spv_legal_name], representing [ownership_percentage]% of the issued

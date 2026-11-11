@@ -180,7 +180,7 @@ export default async function InvestorDashboardPage() {
     );
   }
 
-  const currency = "USD";
+  const currency = "AED";
 
   return (
     <div className="min-h-screen bg-[#fcfaf7] p-6 lg:p-10 space-y-8 text-[#064e3b]">
@@ -462,7 +462,7 @@ export default async function InvestorDashboardPage() {
                   {proj.title}
                 </h3>
                 <p className="text-xs text-gray-500 mt-1">
-                  Target: {proj.currency || "USD"}{" "}
+                  Target: {proj.currency || "AED"}{" "}
                   {Number(proj.target_goal || 0).toLocaleString()}
                 </p>
 

@@ -100,7 +100,7 @@ export default function ProjectDetailView({
     effectiveEligibility.message || effectiveEligibility.reason || null;
 
   const isIssuerPreview = viewerRole === "issuer_preview";
-  const currency = project.currency || "USD";
+  const currency = project.currency || "AED";
   const targetGoal = Number(project.target_goal) || 0;
   const liveRaised = Number(project.live_raised_amount) || 0;
   const rawPercent = targetGoal > 0 ? (liveRaised / targetGoal) * 100 : 0;
@@ -1056,9 +1056,7 @@ export default function ProjectDetailView({
                       ? "Sale to issuer"
                       : contractTerms?.end_of_term === "sale_to_third_party"
                         ? "Sale to third party"
-                        : contractTerms?.end_of_term === "return_asset"
-                          ? "Return asset"
-                          : "—"}
+                        : "—"}
                   </div>
                 </div>
                 {contractTerms?.end_of_term === "sale_to_issuer" && contractTerms?.end_of_term_price != null && (
@@ -1144,24 +1142,14 @@ export default function ProjectDetailView({
                 </div>
                 <div className="p-4 rounded-xl bg-white border border-gray-200/70 shadow-xs space-y-1">
                   <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block">
-                    Voting Rights
-                  </span>
-                  <div className="text-base sm:text-lg font-bold text-gray-900">
-                    {contractTerms?.voting_rights ? "Voting shares included" : "Non-voting shares"}
-                  </div>
-                </div>
-                <div className="p-4 rounded-xl bg-white border border-gray-200/70 shadow-xs space-y-1">
-                  <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block">
                     Dividend Policy
                   </span>
                   <div className="text-base sm:text-lg font-bold text-gray-900">
                     {contractTerms?.dividend_policy === "none_planned"
                       ? "None planned"
-                      : contractTerms?.dividend_policy === "discretionary"
-                        ? "Discretionary"
-                        : contractTerms?.dividend_policy === "target_payout"
-                          ? "Target payout"
-                          : "None specified"}
+                      : contractTerms?.dividend_policy === "target_payout"
+                        ? "Target payout"
+                        : "None specified"}
                   </div>
                 </div>
                 <div className="p-4 rounded-xl bg-white border border-gray-200/70 shadow-xs space-y-1">

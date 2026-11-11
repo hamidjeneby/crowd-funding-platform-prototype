@@ -318,7 +318,7 @@ The wizard consists of 6 sequential steps located in [app/components/wizard/](fi
       - `payment_frequency`: `'monthly' | 'quarterly' | 'semi_annual' | 'annual'` (rental payment schedule; `'at_maturity'` not allowed).
       - `asset_description`: String, 10–500 characters (leased asset).
       - `asset_value`: Positive number (> 0) in project's currency; must be `>= target_goal`.
-      - `end_of_term`: `'sale_to_issuer' | 'sale_to_third_party' | 'return_asset'`.
+      - `end_of_term`: `'sale_to_issuer' | 'sale_to_third_party'`.
       - `end_of_term_price`: Positive number (> 0); required when `end_of_term === 'sale_to_issuer'`, optional otherwise.
     - **Mudarabah**:
       - `tenor_months`: Whole integer 1–120 (required).
@@ -327,8 +327,7 @@ The wizard consists of 6 sequential steps located in [app/components/wizard/](fi
     - **SPV Equity**:
       - `tenor_months`: Must be `null`.
       - `existing_shares_outstanding`: Whole integer >= 0 (required).
-      - `voting_rights`: Boolean (optional, defaults to false).
-      - `dividend_policy`: `'none_planned' | 'discretionary' | 'target_payout'` (optional).
+      - `dividend_policy`: `'none_planned' | 'target_payout'` (optional).
       - `target_exit_horizon_years`: Integer 1–30 (optional).
   - **Validation Rules**:
     - `soft_cap <= target_goal <= hard_cap`.

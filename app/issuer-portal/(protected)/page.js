@@ -314,7 +314,7 @@ export default async function IssuerPortalDashboard() {
                 targetGoal > 0 ? (displayRaised / targetGoal) * 100 : 0;
               // Remove clamp from displayed percentage so it can read 130%. Cap only visual bar at 100%.
               const percent = rawPercent.toFixed(1);
-              const currency = project.currency || "USD";
+              const currency = project.currency || "AED";
               const isOversubscribed = isLive && rawPercent > 100;
 
               return (

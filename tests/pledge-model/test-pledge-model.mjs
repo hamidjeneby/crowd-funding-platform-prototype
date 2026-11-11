@@ -142,7 +142,7 @@ async function runTests() {
     investor_id: 789,
     investor_class: 2,
     pledge_amount: 50000,
-    currency: "USD",
+    currency: "AED",
     requested_conversion_units: 200,
     terms_version: PLEDGE_TERMS_VERSION,
     signed_at: new Date().toISOString(),

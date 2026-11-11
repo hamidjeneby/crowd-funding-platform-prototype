@@ -195,7 +195,7 @@ export default function MilestonesClient({ heldProjects = [] }) {
               Portfolio Position Held
             </span>
             <span className="text-2xl font-black text-white">
-              USD {totalPortfolioValue.toLocaleString()}
+              AED {totalPortfolioValue.toLocaleString()}
             </span>
           </div>
         </div>

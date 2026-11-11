@@ -128,7 +128,6 @@ All mathematical logic is encapsulated in [`lib/repayments/calc.js`](file:///Use
     $$\text{sale\_proceeds} = \text{round2}\left(\text{end\_of\_term\_price} \times \frac{\text{allocated\_amount}}{\text{total\_allocated}}\right)$$
   - `sale_to_third_party`: Calculated once the issuer reports the actual realized sale proceeds:
     $$\text{sale\_proceeds} = \text{round2}\left(\text{reported\_amount} \times \frac{\text{allocated\_amount}}{\text{total\_allocated}}\right)$$
-  - `return_asset`: No cash proceeds; final period consists of rental payment only.
 
 #### 3. Mudarabah (Profit-Sharing Partnership)
 - **Periodic Profit Pool**:

@@ -91,10 +91,10 @@ This document details the audit workflows for **Milestone Reviews** (`/auditor-p
 | Action Function | Target Entity | Primary Parameters | Key DB Mutations |
 | :--- | :--- | :--- | :--- |
 | `submitInvestorFinalOnboardingDecision` | Investor | `investorId`, `decision`, `reviewNotes` | Updates `onboarding_status` (`approved`/`incomplete`/`rejected`), `review_notes`, syncs Clerk role. |
-| `updateInvestorClassDecision` | Investor | `investorId`, `selectedClass` | Updates `investor_class` (1–10). |
+| `updateInvestorClassDecision` | Investor | `investorId`, `selectedClass` | Updates `investor_class` (1–10; 1 = highest tier, 10 = lowest tier; Class 1 always requires EDD). |
 | `submitIssuerFinalOnboardingDecision` | Issuer | `issuerId`, `decision`, `reviewNotes` | Updates `onboarding_status` (`approved`/`incomplete`/`rejected`), `review_notes`, syncs Clerk role. |
 | `updateProjectShariahCompliance` | Project | `projectId`, `certificateFile` | Uploads to `shariah_compliance_docs`, sets `shariah_compliance_status = 'approved'`, locks Steps 1–3. |
-| `updateProjectMinClassDecision` | Project | `projectId`, `selectedClass` | Updates `min_eligible_investor_class` (1–10). |
+| `updateProjectMinClassDecision` | Project | `projectId`, `selectedClass` | Updates `min_eligible_investor_class` (1–10; strictly 1–4 for `spv_equity` projects). |
 | `updateProjectDocumentDecision` | Project Doc | `docId`, `decision`, `rejectionReason` | Updates `review_status` (`approved`/`rejected`), `rejection_reason`. |
 | `updateProjectMediaDecision` | Project Media | `mediaId`, `decision`, `rejectionReason` | Updates `review_status` (`approved`/`rejected`), `rejection_reason`. |
 | `updateProjectCoverImageDecision` | Project | `projectId`, `decision` | Updates `cover_image_review_status` (`approved`/`rejected`). |

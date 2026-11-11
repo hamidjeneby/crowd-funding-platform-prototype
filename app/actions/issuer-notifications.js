@@ -289,7 +289,7 @@ export async function notifyIssuerPledgeAndThresholds(projectId, newPledgeId) {
       return;
     }
 
-    const currency = project.currency || "USD";
+    const currency = project.currency || "AED";
     const targetGoal = Number(project.target_goal) || 0;
     const softCap = Number(project.soft_cap) || 0;
     const hardCap = Number(project.hard_cap) || 0;

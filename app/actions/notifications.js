@@ -153,7 +153,7 @@ export async function evaluateThresholdNotifications(projectId, newPledgeId) {
     const newPledge = pledges.find((p) => p.id === newPledgeId);
     if (!newPledge) return;
 
-    const currency = project.currency || "USD";
+    const currency = project.currency || "AED";
     const targetGoal = Number(project.target_goal) || 0;
 
     // --- SUBSCRIPTION THRESHOLD EVALUATION ---

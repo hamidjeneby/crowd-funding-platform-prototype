@@ -109,7 +109,7 @@ test("Section 4 Composition: Ijara (sale to issuer)", () => {
   );
 });
 
-test("Section 4 Composition: Ijara (sale to third party & return asset)", () => {
+test("Section 4 Composition: Ijara (sale to third party)", () => {
   const p1 = {
     sharia_contract_type: "ijara",
     tenor_months: 12,
@@ -127,10 +127,6 @@ test("Section 4 Composition: Ijara (sale to third party & return asset)", () => 
     sec4a.end_of_term_text,
     "The asset is sold to a third party and the proceeds are distributed to holders."
   );
-
-  const p2 = { ...p1, contract_terms: { ...p1.contract_terms, end_of_term: "return_asset" } };
-  const sec4b = composeCertificateSection4({ project: p2, pledge: { allocated_amount: 20000 } });
-  assert.equal(sec4b.end_of_term_text, "The asset is returned at the end of the term.");
 });
 
 test("Section 4 Composition: Mudarabah", () => {
@@ -167,8 +163,7 @@ test("Section 4 Composition: SPV Equity", () => {
     sharia_contract_type: "spv_equity",
     contract_terms: {
       existing_shares_outstanding: 8000,
-      voting_rights: false,
-      dividend_policy: "discretionary",
+      dividend_policy: "target_payout",
       target_exit_horizon_years: 5,
     },
   };
@@ -189,7 +184,7 @@ test("Section 4 Composition: SPV Equity", () => {
   );
   assert.equal(
     sec4.payments_text,
-    "Dividends at the issuer's discretion. Voting rights: No."
+    "Target dividend payout."
   );
   assert.equal(
     sec4.end_of_term_text,
@@ -311,7 +306,7 @@ test("Institutional investor and non-SPV issuer fallback", () => {
   const project = {
     id: 102,
     title: "Gulf Trade Murabaha",
-    currency: "USD",
+    currency: "AED",
     sharia_contract_type: "murabaha",
     is_spv: false,
     unit_price: 500,

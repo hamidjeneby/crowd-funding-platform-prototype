@@ -85,7 +85,7 @@ export default function Step3Financials({
         payment_frequency: existing.payment_frequency || "quarterly",
         asset_description: existing.asset_description || "",
         asset_value: existing.asset_value ?? "",
-        end_of_term: existing.end_of_term || "sale_to_issuer",
+        end_of_term: existing.end_of_term === "return_asset" ? "sale_to_issuer" : (existing.end_of_term || "sale_to_issuer"),
         end_of_term_price: existing.end_of_term_price ?? "",
       };
     }
@@ -100,8 +100,10 @@ export default function Step3Financials({
     if (shariaContractType === "spv_equity") {
       return {
         existing_shares_outstanding: existing.existing_shares_outstanding ?? "",
-        voting_rights: existing.voting_rights ?? false,
-        dividend_policy: existing.dividend_policy || "discretionary",
+        dividend_policy:
+          existing.dividend_policy && existing.dividend_policy !== "discretionary"
+            ? existing.dividend_policy
+            : "",
         target_exit_horizon_years: existing.target_exit_horizon_years ?? "",
       };
     }
@@ -622,7 +624,6 @@ export default function Step3Financials({
                   <option value="">Select outcome...</option>
                   <option value="sale_to_issuer">Sale to Issuer (Asset Transfer)</option>
                   <option value="sale_to_third_party">Sale to Third Party</option>
-                  <option value="return_asset">Return Asset to SPV / Investors</option>
                 </select>
                 {errors.contract_terms?.end_of_term && (
                   <p className="mt-1 text-sm text-red-600">{errors.contract_terms.end_of_term.message}</p>
@@ -775,7 +776,6 @@ export default function Step3Financials({
                 >
                   <option value="">Select dividend policy...</option>
                   <option value="none_planned">None Planned (Profits Reinvested for Growth)</option>
-                  <option value="discretionary">Discretionary (Board Declared)</option>
                   <option value="target_payout">Target Payout</option>
                 </select>
                 {errors.contract_terms?.dividend_policy && (
@@ -805,19 +805,6 @@ export default function Step3Financials({
                     {errors.contract_terms.target_exit_horizon_years.message}
                   </p>
                 )}
-              </div>
-
-              <div className="flex items-center pt-6">
-                <input
-                  type="checkbox"
-                  id="voting_rights"
-                  {...register("contract_terms.voting_rights")}
-                  disabled={isFinancialsLocked}
-                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <label htmlFor="voting_rights" className="ml-2 block text-sm font-medium text-gray-900">
-                  Shares carry voting rights
-                </label>
               </div>
             </div>
           </div>

@@ -14,7 +14,7 @@ export default function DistributionsTab({
   classBreakdown = [],
   statusCounts = { pending: 0, allocated: 0, active: 0, completed: 0 },
 }) {
-  const currency = project?.currency || "USD";
+  const currency = project?.currency || "AED";
 
   return (
     <div className="space-y-8">

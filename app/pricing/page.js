@@ -87,7 +87,7 @@ export default function Pricing() {
                   <div>
                     <h3 className="font-bold text-[#064e3b] text-base">Payment Processing</h3>
                     <p className="text-sm text-[#064e3b]/70">
-                      Standard credit card and payment gateway processing fees ($0.30 per transaction).
+                      Standard credit card and payment gateway processing fees (AED 1.10 per transaction).
                     </p>
                   </div>
                 </div>
@@ -166,7 +166,7 @@ export default function Pricing() {
             <div className="flex justify-between items-center text-sm font-bold">
               <span>Target Funding Goal:</span>
               <span className="text-2xl font-extrabold text-[#34d399]">
-                ${targetRaise.toLocaleString()}
+                AED {targetRaise.toLocaleString()}
               </span>
             </div>
 
@@ -180,25 +180,25 @@ export default function Pricing() {
               className="w-full accent-[#34d399] cursor-pointer"
             />
             <div className="flex justify-between text-xs text-white/70">
-              <span>$10,000</span>
-              <span>$500,000</span>
-              <span>$1,000,000</span>
+              <span>AED 10,000</span>
+              <span>AED 500,000</span>
+              <span>AED 1,000,000</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-white/15 text-center sm:text-left">
               <div className="p-4 rounded-xl bg-white/5 border border-white/10">
                 <p className="text-xs text-white/70 font-semibold uppercase">5% Platform Fee</p>
-                <p className="text-xl font-bold text-white mt-1">-${platformFee.toLocaleString()}</p>
+                <p className="text-xl font-bold text-white mt-1">-AED {platformFee.toLocaleString()}</p>
               </div>
 
               <div className="p-4 rounded-xl bg-white/5 border border-white/10">
                 <p className="text-xs text-white/70 font-semibold uppercase">~3% Processing</p>
-                <p className="text-xl font-bold text-white mt-1">-${processingFee.toLocaleString()}</p>
+                <p className="text-xl font-bold text-white mt-1">-AED {processingFee.toLocaleString()}</p>
               </div>
 
               <div className="p-4 rounded-xl bg-[#059669] border border-[#34d399]/40 text-white">
                 <p className="text-xs text-[#34d399] font-bold uppercase">Estimated Net Payout</p>
-                <p className="text-2xl font-extrabold text-white mt-1">${netPayout.toLocaleString()}</p>
+                <p className="text-2xl font-extrabold text-white mt-1">AED {netPayout.toLocaleString()}</p>
               </div>
             </div>
           </div>

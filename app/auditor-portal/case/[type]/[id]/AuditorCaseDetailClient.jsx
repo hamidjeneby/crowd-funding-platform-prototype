@@ -290,14 +290,13 @@ export default function AuditorCaseDetailClient({
                 <div className="bg-gray-50 p-3.5 rounded-2xl">
                   <span className="text-gray-400 font-semibold block mb-0.5">Funding Target Goal</span>
                   <span className="font-bold text-emerald-800 text-base flex items-center gap-1">
-                    <DollarSign className="w-4 h-4 text-emerald-600" />
-                    {entity?.funding_goal ? Number(entity.funding_goal).toLocaleString() : "N/A"}
+                    AED {entity?.funding_goal ? Number(entity.funding_goal).toLocaleString() : "N/A"}
                   </span>
                 </div>
                 <div className="bg-gray-50 p-3.5 rounded-2xl">
                   <span className="text-gray-400 font-semibold block mb-0.5">Minimum Investment</span>
                   <span className="font-bold text-gray-800 text-base">
-                    ${entity?.minimum_investment ? Number(entity.minimum_investment).toLocaleString() : "N/A"}
+                    {entity?.minimum_investment ? `AED ${Number(entity.minimum_investment).toLocaleString()}` : "N/A"}
                   </span>
                 </div>
                 <div className="bg-gray-50 p-3.5 rounded-2xl">
@@ -333,7 +332,7 @@ export default function AuditorCaseDetailClient({
                   <div className="bg-gray-50 p-3.5 rounded-2xl">
                     <span className="text-gray-400 font-semibold block mb-0.5">Release Amount / Share</span>
                     <span className="font-bold text-emerald-800 text-base">
-                      {entity?.amount ? `$${Number(entity.amount).toLocaleString()}` : `${entity?.release_percentage || 0}% of Total Pool`}
+                      {entity?.amount ? `AED ${Number(entity.amount).toLocaleString()}` : `${entity?.release_percentage || 0}% of Total Pool`}
                     </span>
                   </div>
                   <div className="bg-gray-50 p-3.5 rounded-2xl">

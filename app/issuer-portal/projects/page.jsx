@@ -241,7 +241,7 @@ export default async function ProjectsPage() {
             const daysRemaining = getDaysRemaining(
               project.campaign_end_date || project.deadline
             );
-            const currency = project.currency || "USD";
+            const currency = project.currency || "AED";
             const isOversubscribed = isLive && rawPercent > 100;
 
             return (

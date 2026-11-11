@@ -189,7 +189,7 @@ export default function MarketplaceClient({
       {filteredProjects.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredProjects.map((project) => {
-            const currency = project.currency || "USD";
+            const currency = project.currency || "AED";
             const targetGoal = Number(project.target_goal) || 0;
             const raised = Number(project.live_raised_amount) || 0;
             const rawPercent = targetGoal > 0 ? (raised / targetGoal) * 100 : 0;

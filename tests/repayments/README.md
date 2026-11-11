@@ -126,10 +126,9 @@ ALLOW_SIM=true node scripts/simulation/advance.js --project=<MURABAHA_ID>
 
 Ijara Sukuk represents an equipment or property lease. Payout periods distribute quarterly rental yield, while the final period settles the asset outcome according to the contract's `end_of_term` clause.
 
-### The 3 Ijara End-of-Term Variants:
+### The 2 Ijara End-of-Term Variants:
 1. **`sale_to_issuer` (Default Seeded)**: The issuer signed a binding unilateral purchase undertaking (`wa'd`) to repurchase the asset at a fixed price (`end_of_term_price`, e.g., AED 100,000.00). The full final amount (`AED 101,500.00` = AED 1,500 rent + AED 100,000 buyback) is pre-scheduled upfront. When Period 4 is due, the issuer directly clicks **"Pay investors"**.
 2. **`sale_to_third_party`**: The asset is auctioned or sold on the open market at term completion. Because market sale proceeds cannot be known in advance, Period 4 requires the issuer to click **"Report sale proceeds"**, disclose the gross proceeds realized from the third-party buyer, and then click **"Pay investors"** to disburse the proceeds pro-rata.
-3. **`return_asset`**: The asset is returned to the investors / SPV without any cash buyback. Only quarterly rent is disbursed throughout the tenor.
 
 ---
 

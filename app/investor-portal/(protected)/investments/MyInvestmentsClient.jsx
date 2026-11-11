@@ -215,7 +215,7 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                 const pledgeClass = pledge.investor_class_at_pledge || investorClass;
                 const pledgeFeePercent = pledge.fee_percent_at_pledge != null ? pledge.fee_percent_at_pledge : 0;
                 const conversionRights = getConversionRights(pledgeClass, project);
-                const currency = project.currency || "USD";
+                const currency = project.currency || "AED";
                 const amount = Number(pledge.pledged_amount || 0);
                 const fee = Number(pledge.fee_amount || 0);
 
@@ -414,7 +414,7 @@ export default function MyInvestmentsClient({ investorClass, holdings = [], pled
                 const holdingClass = holding.investor_class_at_pledge || investorClass;
                 const holdingFeePercent = holding.fee_percent_at_pledge != null ? holding.fee_percent_at_pledge : 0;
                 const conversionRights = getConversionRights(holdingClass, project);
-                const currency = project.currency || "USD";
+                const currency = project.currency || "AED";
                 const amount = Number(holding.allocated_amount || holding.pledged_amount || 0);
 
                 return (

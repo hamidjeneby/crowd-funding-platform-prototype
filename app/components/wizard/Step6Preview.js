@@ -484,9 +484,7 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
                       ? "Sale to issuer"
                       : contractTerms?.end_of_term === "sale_to_third_party"
                         ? "Sale to third party"
-                        : contractTerms?.end_of_term === "return_asset"
-                          ? "Return asset"
-                          : "—"}
+                        : "—"}
                   </dd>
                 </div>
                 {contractTerms?.end_of_term === "sale_to_issuer" && contractTerms?.end_of_term_price != null && (
@@ -535,12 +533,6 @@ export default function Step6Preview({ projectId, projectData, onPrev, jumpToSte
                     {contractTerms?.existing_shares_outstanding != null
                       ? Number(contractTerms.existing_shares_outstanding).toLocaleString()
                       : "0"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-gray-500">Voting Rights</dt>
-                  <dd className="font-medium text-gray-900">
-                    {contractTerms?.voting_rights ? "Voting shares included" : "Non-voting shares"}
                   </dd>
                 </div>
                 <div>

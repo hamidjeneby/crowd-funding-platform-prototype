@@ -213,7 +213,7 @@ export default function Home() {
                 </div>
                 <div>
                   <p className="text-xs font-bold text-[#064e3b]">Live Activity</p>
-                  <p className="text-xs text-[#064e3b]/70 font-medium">+$2,500 pledged to Solar Tech</p>
+                  <p className="text-xs text-[#064e3b]/70 font-medium">+AED 2,500 pledged to Solar Tech</p>
                 </div>
               </div>
 
@@ -234,7 +234,7 @@ export default function Home() {
                       <TrendingUp className="w-4 h-4" />
                     </div>
                     <p className="text-3xl sm:text-4xl font-extrabold text-[#059669] tracking-tight">
-                      <AnimatedNumber end={50} prefix="$" suffix="M+" />
+                      <AnimatedNumber end={50} prefix="AED " suffix="M+" />
                     </p>
                     <p className="text-xs font-bold text-[#064e3b]/70 uppercase tracking-wider mt-1">
                       Total Raised
@@ -673,8 +673,8 @@ export default function Home() {
                   {/* Progress Bar & Amounts */}
                   <div className="space-y-2 pt-2">
                     <div className="flex justify-between items-baseline text-sm">
-                      <span className="font-extrabold text-[#059669] text-base">${project.raised.toLocaleString()}</span>
-                      <span className="text-[#064e3b]/60 text-xs font-semibold">of ${project.goal.toLocaleString()} goal</span>
+                      <span className="font-extrabold text-[#059669] text-base">AED {project.raised.toLocaleString()}</span>
+                      <span className="text-[#064e3b]/60 text-xs font-semibold">of AED {project.goal.toLocaleString()} goal</span>
                     </div>
 
                     <div className="w-full h-2.5 bg-[#ecfdf5] rounded-full overflow-hidden border border-[#059669]/10">

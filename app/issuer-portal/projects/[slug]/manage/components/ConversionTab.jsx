@@ -6,7 +6,7 @@ export default function ConversionTab({ project }) {
   if (!project) return null;
 
   const spvDetails = project.spv_details;
-  const currency = project.currency || "USD";
+  const currency = project.currency || "AED";
 
   const totalSharesAuthorized = Number(spvDetails?.total_shares_authorized) || 0;
   const conversionRatioShares = Number(spvDetails?.conversion_ratio_shares) || 1;

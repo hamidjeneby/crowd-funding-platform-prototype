@@ -69,7 +69,7 @@ export default function AccountAndBankingPage() {
     account_number: "",
     iban: "",
     swift_code: "",
-    currency: "USD",
+    currency: "AED",
     bank_address: "",
   });
   const [bankStatus, setBankStatus] = useState("verified");
@@ -102,7 +102,7 @@ export default function AccountAndBankingPage() {
           account_number: bd.account_number || "",
           iban: bd.iban || "",
           swift_code: bd.swift_code || bd.routing_number || "",
-          currency: bd.currency || "USD",
+          currency: bd.currency || "AED",
           bank_address: bd.bank_address || "",
         };
         setBankForm(loadedForm);
@@ -438,7 +438,7 @@ export default function AccountAndBankingPage() {
                   <div className="flex justify-between border-b border-gray-100 pb-2">
                     <span className="text-gray-500 font-medium">Currency</span>
                     <span className="font-bold text-[#064e3b]">
-                      {bankForm.currency || "USD"}
+                      {bankForm.currency || "AED"}
                     </span>
                   </div>
 
@@ -586,10 +586,10 @@ export default function AccountAndBankingPage() {
                         errors.currency ? "border-red-500" : "border-[#059669]/30"
                       }`}
                     >
+                      <option value="AED">AED (د.إ)</option>
                       <option value="USD">USD ($)</option>
                       <option value="EUR">EUR (€)</option>
                       <option value="GBP">GBP (£)</option>
-                      <option value="AED">AED (د.إ)</option>
                     </select>
                     {errors.currency && (
                       <p className="mt-1 text-xs text-red-600 font-medium">

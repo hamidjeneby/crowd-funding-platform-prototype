@@ -27,7 +27,7 @@ export default function OverviewTab({
   const softCap = Number(project.soft_cap) || 0;
   const hardCap = Number(project.hard_cap) || 0;
   const liveRaised = Number(project.live_raised_amount) || 0;
-  const currency = project.currency || "USD";
+  const currency = project.currency || "AED";
 
   const status = project.status || "draft";
   const isFunded = status === "funded";
@@ -455,7 +455,6 @@ export default function OverviewTab({
             {contractType === "spv_equity" && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div><span className="font-semibold text-gray-700">Existing Shares:</span> <span>{contractTerms?.existing_shares_outstanding != null ? Number(contractTerms.existing_shares_outstanding).toLocaleString() : "0"}</span></div>
-                <div><span className="font-semibold text-gray-700">Voting Rights:</span> <span>{contractTerms?.voting_rights ? "Voting shares included" : "Non-voting shares"}</span></div>
                 <div><span className="font-semibold text-gray-700">Dividend Policy:</span> <span className="capitalize">{contractTerms?.dividend_policy ? contractTerms.dividend_policy.replace("_", " ") : "None planned"}</span></div>
                 <div><span className="font-semibold text-gray-700">Target Exit:</span> <span>{contractTerms?.target_exit_horizon_years ? `${contractTerms.target_exit_horizon_years} years` : "Not specified"}</span></div>
               </div>

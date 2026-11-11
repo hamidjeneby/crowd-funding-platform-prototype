@@ -254,7 +254,7 @@ export async function getInvestorWalletTransactions() {
                   id: project.id,
                   title: project.title,
                   slug: project.slug,
-                  currency: project.currency || "USD",
+                  currency: project.currency || "AED",
                 }
               : null,
           }
@@ -595,7 +595,7 @@ export async function getInvestorMilestonesPageData() {
       title: proj.title,
       slug: proj.slug,
       category: proj.spv_details?.asset_class || proj.unit_type || "Investment Asset",
-      currency: proj.currency || "USD",
+      currency: proj.currency || "AED",
       holdingAmount: 0,
       pledgesCount: 0,
       milestones: [],

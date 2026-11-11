@@ -56,7 +56,7 @@ function formatUtcDateTime(dateString) {
 
 export default function MyWalletPage() {
   const [balance, setBalance] = useState(0);
-  const [currency, setCurrency] = useState("USD");
+  const [currency, setCurrency] = useState("AED");
   const [bankStatus, setBankStatus] = useState("verified");
   const [isLoadingData, setIsLoadingData] = useState(true);
 
@@ -79,7 +79,7 @@ export default function MyWalletPage() {
           getInvestorWalletTransactions(),
         ]);
         setBalance(portalData.wallet_balance || 0);
-        setCurrency(portalData.bank_details?.currency || "USD");
+        setCurrency(portalData.bank_details?.currency || "AED");
         setBankStatus(portalData.bank_verification_status || "verified");
         setTransactions(txData || []);
       } catch (err) {

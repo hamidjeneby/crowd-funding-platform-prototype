@@ -1108,9 +1108,7 @@ export default function ProjectDetailReviewClient({
                     ? "Sale to issuer"
                     : contractTerms?.end_of_term === "sale_to_third_party"
                       ? "Sale to third party"
-                      : contractTerms?.end_of_term === "return_asset"
-                        ? "Return asset"
-                        : "N/A"}
+                      : "N/A"}
                 </span>
               </div>
               {contractTerms?.end_of_term === "sale_to_issuer" && contractTerms?.end_of_term_price != null && (
@@ -1175,12 +1173,6 @@ export default function ProjectDetailReviewClient({
                   {contractTerms?.existing_shares_outstanding != null
                     ? Number(contractTerms.existing_shares_outstanding).toLocaleString()
                     : "0"}
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-500 block">Voting Rights:</span>
-                <span className="font-bold text-gray-900">
-                  {contractTerms?.voting_rights ? "Voting shares included" : "Non-voting shares"}
                 </span>
               </div>
               <div>
